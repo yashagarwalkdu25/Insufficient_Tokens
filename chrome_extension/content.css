@@ -1,0 +1,26 @@
+/* Content script styles — scoped via unique IDs to avoid page conflicts */
+#cv-verify-btn {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+#cv-overlay * {
+  box-sizing: border-box;
+}
+
+#cv-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+#cv-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#cv-panel::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+#cv-panel::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
