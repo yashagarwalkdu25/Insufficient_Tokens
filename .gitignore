@@ -1,0 +1,5 @@
+.venv
+.env
+.claude
+.venv
+chroma_db

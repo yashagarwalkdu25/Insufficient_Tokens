@@ -22,7 +22,7 @@ verifyBtn.addEventListener("click", () => {
     if (response && response.ok) {
       renderResult(response.data, claim);
     } else {
-      const err = response?.error || "Cannot reach server. Is the API running on localhost:5000?";
+      const err = response?.error || "Cannot reach server. Is the API running on localhost:5001?";
       statusArea.innerHTML = `<p class="status error">❌ ${escapeHtml(err)}</p>`;
     }
   });

@@ -1,10 +1,12 @@
-"""ChromaDB vector store for evidence storage and retrieval."""
+"""ChromaDB vector store for evidence storage and retrieval with enhanced metadata."""
 import time
+from urllib.parse import urlparse
+from typing import Optional
 import chromadb
 from sentence_transformers import SentenceTransformer
 from config import (
     CHROMA_PERSIST_DIR, COLLECTION_NAME, EMBEDDING_MODEL,
-    TOP_K_RETRIEVAL, EMBEDDING_DIM
+    TOP_K_RETRIEVAL, SOURCE_CREDIBILITY
 )
 
 
@@ -23,40 +25,93 @@ class VectorStore:
     # Indexing
     # ------------------------------------------------------------------
     def add_document(self, text: str, source: str, details: str = "",
-                     timestamp: str = "") -> str:
-        """Index a document with metadata. Returns the generated doc id."""
+                     timestamp: str = "", source_type: Optional[str] = None) -> str:
+        """Index a document with enhanced metadata. Returns the generated doc id.
+
+        Args:
+            text: Evidence text
+            source: Source URL or reference
+            details: Additional details (title, description)
+            timestamp: ISO timestamp (auto-generated if not provided)
+            source_type: Type of source (news/academic/fact_checker/government)
+
+        Returns:
+            Document ID
+        """
         ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         doc_id = f"doc_{int(time.time()*1000)}_{hash(text) % 100000}"
         embedding = self._embedder.encode(text).tolist()
+
+        # Extract domain and determine source type/credibility
+        domain = self._extract_domain(source)
+        credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
+
+        if not source_type:
+            source_type = self._infer_source_type(domain)
+
+        metadata = {
+            "source": source,
+            "source_type": source_type,
+            "source_credibility": credibility,
+            "details": details,
+            "timestamp": ts,
+            "access_count": 0,
+            "verification_count": 0,
+            "avg_relevance": 0.0,
+            "last_accessed": ts,
+            "domain": domain,
+            "text_length": len(text),
+            "language": "en",  # Default to English, can be enhanced with language detection
+        }
+
         self._collection.add(
             ids=[doc_id],
             embeddings=[embedding],
             documents=[text],
-            metadatas=[{
-                "source": source,
-                "details": details,
-                "timestamp": ts,
-                "access_count": 0,
-            }],
+            metadatas=[metadata],
         )
         return doc_id
 
     def add_documents_batch(self, docs: list[dict]) -> list[str]:
-        """Batch-index documents. Each dict needs: text, source, details."""
+        """Batch-index documents with enhanced metadata.
+
+        Each dict needs: text, source, and optionally: details, timestamp, source_type
+
+        Args:
+            docs: List of document dicts
+
+        Returns:
+            List of document IDs
+        """
         if not docs:
             return []
         ids, embeddings, texts, metas = [], [], [], []
         for d in docs:
             ts = d.get("timestamp", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
             doc_id = f"doc_{int(time.time()*1000)}_{hash(d['text']) % 100000}"
+
+            # Extract domain and determine metadata
+            source = d.get("source", "")
+            domain = self._extract_domain(source)
+            credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
+            source_type = d.get("source_type") or self._infer_source_type(domain)
+
             ids.append(doc_id)
             texts.append(d["text"])
             embeddings.append(self._embedder.encode(d["text"]).tolist())
             metas.append({
-                "source": d.get("source", ""),
+                "source": source,
+                "source_type": source_type,
+                "source_credibility": credibility,
                 "details": d.get("details", ""),
                 "timestamp": ts,
                 "access_count": 0,
+                "verification_count": 0,
+                "avg_relevance": 0.0,
+                "last_accessed": ts,
+                "domain": domain,
+                "text_length": len(d["text"]),
+                "language": "en",
             })
         self._collection.add(ids=ids, embeddings=embeddings,
                              documents=texts, metadatas=metas)
@@ -110,3 +165,55 @@ class VectorStore:
 
     def count(self) -> int:
         return self._collection.count()
+
+    def _extract_domain(self, url: str) -> str:
+        """Extract domain from URL.
+
+        Args:
+            url: Full URL or partial URL
+
+        Returns:
+            Domain string (e.g., 'reuters.com')
+        """
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            # Remove www. prefix
+            if domain.startswith("www."):
+                domain = domain[4:]
+            return domain
+        except Exception:
+            return ""
+
+    def _infer_source_type(self, domain: str) -> str:
+        """Infer source type from domain.
+
+        Args:
+            domain: Domain string
+
+        Returns:
+            Source type: news/academic/fact_checker/government/unknown
+        """
+        # Fact-checkers
+        fact_checkers = ["snopes.com", "factcheck.org", "politifact.com", "fullfact.org"]
+        if domain in fact_checkers:
+            return "fact_checker"
+
+        # Government/Scientific
+        if domain.endswith(".gov") or domain.endswith(".gov.uk"):
+            return "government"
+
+        gov_scientific = ["who.int", "cdc.gov", "nasa.gov", "nih.gov"]
+        if domain in gov_scientific:
+            return "government"
+
+        # Academic
+        academic = ["scholar.google.com", "arxiv.org", "nature.com", "science.org"]
+        if domain in academic or ".edu" in domain:
+            return "academic"
+
+        # News (if in SOURCE_CREDIBILITY with decent score)
+        if domain in SOURCE_CREDIBILITY and SOURCE_CREDIBILITY[domain] >= 0.7:
+            return "news"
+
+        return "unknown"

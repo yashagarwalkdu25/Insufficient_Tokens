@@ -1,6 +1,6 @@
 // Background service worker — handles context menu and message routing
 
-const API_URL = "http://localhost:5000/api/verify";
+const API_URL = "http://localhost:5001/api/verify";
 
 // Create right-click context menu on install
 chrome.runtime.onInstalled.addListener(() => {

@@ -38,6 +38,9 @@ def verify_claim():
             "reasoning": result.reasoning,
             "evidence": evidence_list,
             "steps": result.steps,
+            "claim_type": result.claim_type,
+            "original_claim": result.original_claim,
+            "session_id": result.session_id,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -50,4 +53,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5001, debug=False)

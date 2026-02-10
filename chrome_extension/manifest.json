@@ -4,7 +4,7 @@
   "description": "Highlight any text on the web → Verify claim → Get verdict with citations",
   "version": "1.0.0",
   "permissions": ["contextMenus", "activeTab", "storage"],
-  "host_permissions": ["http://localhost:5000/*"],
+  "host_permissions": ["http://localhost:5001/*"],
   "background": {
     "service_worker": "background.js"
   },

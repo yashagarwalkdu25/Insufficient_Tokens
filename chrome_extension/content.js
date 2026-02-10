@@ -5,16 +5,18 @@
   const BUTTON_ID = "cv-verify-btn";
   const OVERLAY_ID = "cv-overlay";
   const PANEL_ID = "cv-panel";
+  const API_URL = "http://localhost:5001/api/verify";
 
   // ── Floating "Verify Claim" button on text selection ──────────────
   function createFloatingButton(x, y, text) {
     removeFloatingButton();
     const btn = document.createElement("button");
     btn.id = BUTTON_ID;
-    btn.textContent = "🔍 Verify Claim";
+    btn.textContent = "\u{1F50D} Verify Claim";
     btn.style.cssText = `
       position: fixed; z-index: 2147483647;
-      left: ${x}px; top: ${y}px;
+      left: ${Math.min(x, window.innerWidth - 160)}px;
+      top: ${Math.max(y, 10)}px;
       background: #1a73e8; color: #fff; border: none; border-radius: 8px;
       padding: 8px 16px; font-size: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
@@ -24,6 +26,7 @@
     btn.addEventListener("mouseleave", () => (btn.style.background = "#1a73e8"));
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
+      e.preventDefault();
       removeFloatingButton();
       verifyClaim(text);
     });
@@ -37,6 +40,10 @@
 
   // Show button near selection
   document.addEventListener("mouseup", (e) => {
+    // Ignore if the click was on the verify button itself or the overlay
+    const tgt = e.target.nodeType === 1 ? e.target : e.target.parentElement;
+    if (tgt && (tgt.id === BUTTON_ID || tgt.closest("#" + OVERLAY_ID))) return;
+
     setTimeout(() => {
       const sel = window.getSelection().toString().trim();
       if (sel.length > 5 && sel.length < 2000) {
@@ -44,7 +51,7 @@
       } else {
         removeFloatingButton();
       }
-    }, 50);
+    }, 100);
   });
 
   // Hide button on click elsewhere
@@ -54,20 +61,30 @@
     }
   });
 
-  // ── Verification call ─────────────────────────────────────────────
+  // ── Verification call (direct fetch — no background worker dependency) ──
   function verifyClaim(claim) {
     showOverlay(claim, null, true); // loading state
-    chrome.runtime.sendMessage(
-      { action: "api-verify", claim },
-      (response) => {
-        if (response && response.ok) {
-          showOverlay(claim, response.data, false);
-        } else {
-          const errMsg = response?.error || "Could not connect to the verification server. Make sure the API is running on localhost:5000.";
-          showOverlay(claim, { verdict: "Error", reasoning: errMsg, evidence: [], confidence: 0 }, false);
-        }
-      }
-    );
+
+    fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ claim }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error("Server returned " + r.status);
+        return r.json();
+      })
+      .then((data) => {
+        showOverlay(claim, data, false);
+      })
+      .catch((err) => {
+        showOverlay(claim, {
+          verdict: "Error",
+          reasoning: "Could not connect to the verification server (" + err.message + "). Make sure the API is running: python api.py",
+          evidence: [],
+          confidence: 0,
+        }, false);
+      });
   }
 
   // ── Result overlay ────────────────────────────────────────────────
@@ -134,6 +151,7 @@
     else if (v === "false") { verdictColor = "#dc3545"; verdictBg = "#f8d7da"; verdictEmoji = "❌"; }
     else if (v.includes("partial")) { verdictColor = "#ffc107"; verdictBg = "#fff3cd"; verdictEmoji = "⚠️"; }
     else if (v.includes("misleading")) { verdictColor = "#fd7e14"; verdictBg = "#ffe0cc"; verdictEmoji = "🟠"; }
+    else if (v.includes("not verifiable")) { verdictColor = "#6c757d"; verdictBg = "#e2e3e5"; verdictEmoji = "💬"; }
     else if (v === "error") { verdictColor = "#dc3545"; verdictBg = "#f8d7da"; verdictEmoji = "⚙️"; }
     else { verdictColor = "#6c757d"; verdictBg = "#e2e3e5"; verdictEmoji = "❓"; }
 
@@ -146,11 +164,17 @@
         <h3 style="font-size:15px; margin:0 0 8px; color:#333;">📄 Evidence (${data.evidence.length} sources)</h3>`;
       data.evidence.forEach((ev, i) => {
         const originBadge = ev.origin === "kb" ? "🗄️ KB" : ev.origin === "fact_check" ? "✅ Fact-Check" : "🌐 Web";
+        // Credibility stars based on score
+        let credibilityStars = "";
+        if (ev.score >= 5.0) credibilityStars = "⭐⭐⭐";
+        else if (ev.score >= 3.0) credibilityStars = "⭐⭐";
+        else if (ev.score >= 1.0) credibilityStars = "⭐";
+
         evidenceHTML += `
           <div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:10px; margin-bottom:6px; font-size:13px;">
             <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
               <span style="font-weight:600;">[${i + 1}] ${originBadge}</span>
-              <span style="color:#888;">Score: ${ev.score.toFixed(2)}</span>
+              <span style="color:#888;">Score: ${ev.score.toFixed(2)} ${credibilityStars}</span>
             </div>
             <p style="margin:0 0 4px; color:#333;">${escapeHtml(ev.text)}</p>
             ${ev.source ? `<a href="${escapeHtml(ev.source)}" target="_blank" rel="noopener" style="color:#1a73e8; font-size:12px; text-decoration:none; word-break:break-all;">🔗 ${escapeHtml(ev.source)}</a>` : ""}
@@ -187,8 +211,20 @@
       </div>
 
       <div style="margin-bottom:12px;">
-        <span style="font-size:13px; color:#888;">Verified claim:</span>
-        <p style="margin:2px 0 0; font-style:italic; color:#333; font-size:14px;">"${escapeHtml(data.claim || claim)}"</p>
+        ${data.claim_type ? `<div style="margin-bottom:4px; font-size:12px;"><strong>Claim Type:</strong> ${data.claim_type === 'FACTUAL' ? '🔵' : data.claim_type === 'OPINION' ? '🟡' : data.claim_type === 'MIXED' ? '🟠' : '⚪'} ${data.claim_type}</div>` : ''}
+        ${data.original_claim && data.original_claim !== data.claim ? `
+          <div style="margin-bottom:4px;">
+            <span style="font-size:13px; color:#888;">Original input:</span>
+            <p style="margin:2px 0 0; font-style:italic; color:#666; font-size:13px;">"${escapeHtml(data.original_claim)}"</p>
+          </div>
+          <div>
+            <span style="font-size:13px; color:#888;">Extracted claim:</span>
+            <p style="margin:2px 0 0; font-style:italic; color:#333; font-size:14px;">"${escapeHtml(data.claim)}"</p>
+          </div>
+        ` : `
+          <span style="font-size:13px; color:#888;">Verified claim:</span>
+          <p style="margin:2px 0 0; font-style:italic; color:#333; font-size:14px;">"${escapeHtml(data.claim || claim)}"</p>
+        `}
       </div>
 
       <div style="margin-bottom:12px;">
