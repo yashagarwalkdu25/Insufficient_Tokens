@@ -3,7 +3,6 @@ import streamlit as st
 import time
 from agent import ClaimVerifier, VerificationResult
 from seed_kb import seed
-from vector_store import VectorStore
 
 # ── Page config ───────────────────────────────────────────────────────
 st.set_page_config(
@@ -60,8 +59,8 @@ st.markdown("""
     }
     .hero p {
         font-size: 1rem;
-        color: var(--text-color, #94a3b8);
-        opacity: 0.6;
+        color: #94a3b8;
+        opacity: 0.8;
         margin: 0;
         font-weight: 400;
     }
@@ -69,16 +68,19 @@ st.markdown("""
     /* ── Input Area ───────────────────────────────── */
     .stTextArea textarea {
         border-radius: 14px !important;
-        border: 2px solid rgba(128,128,128,0.3) !important;
+        border: 2px solid rgba(99,102,241,0.3) !important;
         padding: 16px !important;
         font-size: 1rem !important;
         transition: border-color 0.3s, box-shadow 0.3s !important;
-        background: var(--secondary-background-color, #f8fafc) !important;
-        color: var(--text-color, #334155) !important;
+        caret-color: currentColor !important;
     }
     .stTextArea textarea:focus {
         border-color: #6366f1 !important;
         box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+        caret-color: #6366f1 !important;
+    }
+    .stTextArea textarea::placeholder {
+        color: rgba(148,163,184,0.6) !important;
     }
 
     /* ── Primary Button ───────────────────────────── */
@@ -87,12 +89,14 @@ st.markdown("""
         color: white !important;
         border: none !important;
         border-radius: 14px !important;
-        padding: 0.75rem 2rem !important;
+        padding: 0.75rem 1.2rem !important;
         font-weight: 600 !important;
-        font-size: 1rem !important;
+        font-size: 0.9rem !important;
         letter-spacing: 0.3px;
         transition: all 0.3s ease !important;
         box-shadow: 0 4px 14px rgba(99,102,241,0.35) !important;
+        white-space: nowrap !important;
+        min-height: 56px !important;
     }
     .stButton > button[kind="primary"]:hover {
         transform: translateY(-2px) !important;
@@ -102,18 +106,17 @@ st.markdown("""
     /* ── Example Buttons ──────────────────────────── */
     .stButton > button[kind="secondary"] {
         border-radius: 24px !important;
-        border: 1.5px solid rgba(128,128,128,0.3) !important;
-        background: var(--secondary-background-color, #ffffff) !important;
+        border: 1.5px solid rgba(99,102,241,0.25) !important;
+        background: rgba(99,102,241,0.08) !important;
         font-size: 0.82rem !important;
         font-weight: 500 !important;
-        color: var(--text-color, #475569) !important;
         padding: 0.45rem 1rem !important;
         transition: all 0.25s ease !important;
     }
     .stButton > button[kind="secondary"]:hover {
         border-color: #6366f1 !important;
-        color: #6366f1 !important;
-        background: rgba(99,102,241,0.1) !important;
+        color: #a5b4fc !important;
+        background: rgba(99,102,241,0.18) !important;
         transform: translateY(-1px) !important;
     }
 
@@ -191,8 +194,8 @@ st.markdown("""
 
     /* ── Claim Info ────────────────────────────────── */
     .claim-info {
-        background: var(--secondary-background-color, #f8fafc);
-        border: 1px solid rgba(128,128,128,0.3);
+        background: rgba(99,102,241,0.06);
+        border: 1px solid rgba(99,102,241,0.15);
         border-radius: 12px;
         padding: 16px 20px;
         margin: 12px 0 20px;
@@ -215,14 +218,14 @@ st.markdown("""
     .claim-text {
         font-size: 1.05rem;
         font-style: italic;
-        color: var(--text-color, #334155);
+        color: #e2e8f0;
         margin: 4px 0 0;
         line-height: 1.5;
     }
     .claim-label {
         font-size: 0.78rem;
         font-weight: 600;
-        color: rgba(148,163,184,0.8);
+        color: #94a3b8;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         margin: 0 0 2px;
@@ -232,7 +235,7 @@ st.markdown("""
     .section-header {
         font-size: 1.15rem;
         font-weight: 700;
-        color: var(--text-color, #1e293b);
+        color: #e2e8f0;
         margin: 1.5rem 0 0.75rem;
         display: flex;
         align-items: center;
@@ -244,14 +247,14 @@ st.markdown("""
 
     /* ── Reasoning Box ────────────────────────────── */
     .reasoning-box {
-        background: var(--secondary-background-color, #ffffff);
-        border: 1px solid rgba(128,128,128,0.3);
+        background: rgba(99,102,241,0.06);
+        border: 1px solid rgba(99,102,241,0.15);
         border-radius: 14px;
         padding: 20px 24px;
         font-size: 0.95rem;
         line-height: 1.7;
-        color: var(--text-color, #334155);
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        color: #cbd5e1;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
     /* ── Evidence Cards ───────────────────────────── */
@@ -265,8 +268,8 @@ st.markdown("""
     .step-log {
         font-family: 'SF Mono', 'Fira Code', monospace;
         font-size: 0.82rem;
-        color: var(--text-color, #64748b);
-        opacity: 0.75;
+        color: #a5b4fc;
+        opacity: 0.85;
         padding: 3px 0;
         margin: 0;
         line-height: 1.6;
@@ -282,7 +285,7 @@ st.markdown("""
     section[data-testid="stSidebar"] .stMarkdown h3 {
         font-size: 1rem;
         font-weight: 700;
-        color: var(--text-color, #1e293b);
+        color: #e2e8f0;
     }
 
     /* ── Pipeline Steps (Sidebar) ─────────────────── */
@@ -291,7 +294,7 @@ st.markdown("""
         align-items: flex-start;
         gap: 12px;
         padding: 10px 0;
-        border-bottom: 1px solid #e2e8f0;
+        border-bottom: 1px solid rgba(128,128,128,0.2);
     }
     .pipeline-step:last-child { border-bottom: none; }
     .step-num {
@@ -313,13 +316,13 @@ st.markdown("""
     .step-title {
         font-weight: 600;
         font-size: 0.85rem;
-        color: var(--text-color, #1e293b);
+        color: #e2e8f0;
         margin: 0;
     }
     .step-desc {
         font-size: 0.78rem;
-        color: var(--text-color, #64748b);
-        opacity: 0.7;
+        color: #a5b4fc;
+        opacity: 0.85;
         margin: 2px 0 0;
     }
 
@@ -336,9 +339,9 @@ st.markdown("""
         border-radius: 20px;
         font-size: 0.72rem;
         font-weight: 600;
-        background: rgba(99,102,241,0.15);
-        color: #818cf8;
-        border: 1px solid rgba(99,102,241,0.3);
+        background: rgba(99,102,241,0.2);
+        color: #a5b4fc;
+        border: 1px solid rgba(99,102,241,0.35);
     }
 
     /* ── KB Metric Card ───────────────────────────── */
@@ -367,8 +370,8 @@ st.markdown("""
     .footer {
         text-align: center;
         padding: 2rem 0 1rem;
-        color: var(--text-color, #94a3b8);
-        opacity: 0.6;
+        color: #94a3b8;
+        opacity: 0.7;
         font-size: 0.8rem;
     }
     .footer-pills {
@@ -383,9 +386,9 @@ st.markdown("""
         padding: 3px 10px;
         border-radius: 20px;
         font-size: 0.7rem;
-        background: var(--secondary-background-color, #f1f5f9);
-        color: var(--text-color, #64748b);
-        border: 1px solid rgba(128,128,128,0.2);
+        background: rgba(99,102,241,0.1);
+        color: #a5b4fc;
+        border: 1px solid rgba(99,102,241,0.2);
     }
 
     /* ── Expander Styling ─────────────────────────── */
@@ -403,11 +406,26 @@ st.markdown("""
     .examples-label {
         font-size: 0.85rem;
         font-weight: 600;
-        color: var(--text-color, #94a3b8);
-        opacity: 0.6;
+        color: #818cf8;
+        opacity: 0.8;
         text-transform: uppercase;
         letter-spacing: 1px;
         margin: 0.5rem 0 0.5rem;
+    }
+
+    /* ── Prevent Streamlit stale-element blur/dim ── */
+    [data-stale] {
+        opacity: 1 !important;
+    }
+    div[data-testid="element-container"],
+    div[data-testid="stVerticalBlockBorderWrapper"],
+    .element-container,
+    .stApp > header + div {
+        opacity: 1 !important;
+        transition: none !important;
+    }
+    iframe[data-testid="stSkeleton"] {
+        display: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -422,7 +440,7 @@ verifier = init_system()
 
 # ── Sidebar ───────────────────────────────────────────────────────────
 with st.sidebar:
-    vs = VectorStore()
+    vs = verifier.vs  # Reuse the cached verifier's VectorStore (no extra model load)
 
     # KB Metric
     st.markdown(f"""
@@ -480,18 +498,32 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Session state for example claims ──────────────────────────────────
+if "selected_example" not in st.session_state:
+    st.session_state.selected_example = ""
+
 # ── Main input ────────────────────────────────────────────────────────
-col1, col2 = st.columns([5, 1])
+col1, col2 = st.columns([4, 1.2])
 with col1:
+    # Pre-fill with example claim if one was clicked
+    default_value = st.session_state.selected_example or ""
     claim_input = st.text_area(
         "Enter a claim to verify",
+        value=default_value,
         placeholder="e.g., 'The Earth is flat' or 'India's GDP grew 8% in 2025' or paste a headline...",
         height=100,
         label_visibility="collapsed",
+        key="claim_text_area",
     )
 with col2:
     st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
     verify_btn = st.button("Verify Claim", type="primary", use_container_width=True)
+
+# Auto-trigger verification when an example was just clicked
+if st.session_state.selected_example:
+    claim_input = st.session_state.selected_example
+    verify_btn = True
+    st.session_state.selected_example = ""  # Reset after use
 
 # ── Example claims ────────────────────────────────────────────────────
 st.markdown('<p class="examples-label">Try an example</p>', unsafe_allow_html=True)
@@ -506,8 +538,8 @@ example_cols = st.columns(len(examples))
 for i, ex in enumerate(examples):
     with example_cols[i]:
         if st.button(ex, key=f"ex_{i}", use_container_width=True):
-            claim_input = ex
-            verify_btn = True
+            st.session_state.selected_example = ex
+            st.rerun()
 
 
 # ── Verdict rendering helpers ────────────────────────────────────────
@@ -651,7 +683,7 @@ if verify_btn and claim_input and claim_input.strip():
     render_result(result)
 
     # Update KB count in sidebar
-    new_count = VectorStore().count()
+    new_count = verifier.vs.count()
     st.sidebar.markdown(f"""
     <div class="kb-metric">
         <p class="num">{new_count}</p>

@@ -6,6 +6,9 @@ load_dotenv()
 
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# Tavily (fallback search when DDG is rate-limited)
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 LLM_MODEL = "gpt-4o-mini"
 LLM_TEMPERATURE = 0.1
 

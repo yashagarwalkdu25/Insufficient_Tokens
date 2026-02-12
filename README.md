@@ -144,7 +144,7 @@ The system follows a multi-stage agentic pipeline where an LLM-powered agent orc
 | **Vector Database** | ChromaDB (persistent, HNSW index) | Stores and retrieves evidence embeddings with cosine similarity |
 | **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | High-precision re-scoring of candidate evidence pairs |
 | **LLM** | GPT-4o-mini (OpenAI) | Claim classification, sufficiency checks, verdict generation |
-| **Web Search** | DuckDuckGo (no API key) | Live evidence retrieval from trusted news and fact-checkers |
+| **Web Search** | DuckDuckGo + Tavily (fallback) | Live evidence retrieval from trusted news and fact-checkers |
 | **Web UI** | Streamlit | Interactive verification interface with agent trace viewer |
 | **REST API** | Flask + Flask-CORS | Backend API powering the Chrome Extension |
 | **Browser Extension** | Chrome Extension (Manifest V3) | Highlight-to-verify workflow on any webpage |
@@ -455,7 +455,7 @@ Input candidates
 
 ### 3.4 Web Search (`web_search.py`)
 
-Three specialised search functions, all built on DuckDuckGo:
+Three specialised search functions with **dual-provider architecture** (DuckDuckGo primary, Tavily fallback):
 
 | Function | Domain Filter | Max Results | Purpose |
 |---|---|---|---|
@@ -463,10 +463,32 @@ Three specialised search functions, all built on DuckDuckGo:
 | `search_trusted(query)` | reuters, bbc, apnews, nytimes | 8 | High-quality news evidence |
 | `search_fact_checkers(claim)` | snopes, factcheck.org, politifact | 5 | Dedicated fact-checking evidence |
 
-**Rate-limit protection:**
-- Browser-like `User-Agent` header (Chrome on macOS)
-- Exponential backoff: 3 retries with delays of 2s, 5s, 10s
-- Only retries on `Ratelimit` errors; other errors fail immediately
+**Dual-provider search flow:**
+
+```
+search_web() / search_trusted() / search_fact_checkers()
+        |
+        v
+  [Try DuckDuckGo] ──── success ──> return results
+        |
+      failure (rate-limit / timeout)
+        |
+        v
+  [Fallback to Tavily] ──── success ──> return results
+        |
+      failure (no API key / error)
+        |
+        v
+    return [] (empty)
+```
+
+- **DuckDuckGo (primary):** Free, no API key required. However, DDG aggressively rate-limits automated requests (HTTP 202), which can block searches for hours.
+- **Tavily (fallback):** Reliable API-based search designed for AI/RAG applications. Requires a free API key (1000 queries/month at [tavily.com](https://tavily.com)). Only used when DDG fails, so free quota is preserved.
+
+**Rate-limit protection (DDG):**
+- 1 retry with a 2-second delay on `Ratelimit` errors
+- Minimal retry since Tavily fallback responds in ~1 second
+- Other errors fail immediately to Tavily fallback
 
 **Return format:** Each function returns `list[dict]` with keys: `title`, `snippet`, `url`.
 
@@ -801,6 +823,11 @@ Content Script (content.js)     Background Service Worker (background.js)
 git clone <repo-url>
 cd W1_RAG
 
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate        # Mac/Linux
+venv\Scripts\activate           # Windows
+
 # Install Python dependencies
 pip install -r requirements.txt
 ```
@@ -813,7 +840,8 @@ pip install -r requirements.txt
 | `openai` | 1.61.0 | GPT-4o-mini API client |
 | `chromadb` | 0.6.3 | Vector database |
 | `sentence-transformers` | 3.4.1 | Embedding and cross-encoder models |
-| `duckduckgo-search` | 7.3.2 | Web search without API key |
+| `duckduckgo-search` | 7.3.2 | Primary web search (no API key required) |
+| `tavily-python` | 0.7.21 | Fallback web search when DDG is rate-limited (requires free API key) |
 | `newspaper3k` | 0.2.8 | Article extraction (optional) |
 | `lxml[html_clean]` | 5.3.0 | HTML parsing for newspaper3k |
 | `python-dotenv` | 1.0.1 | Environment variable loading from `.env` |
@@ -825,11 +853,26 @@ pip install -r requirements.txt
 ```bash
 # Option 1: Environment variable
 export OPENAI_API_KEY=sk-your-key-here        # macOS/Linux
-set OPENAI_API_KEY=sk-your-key-here           # Windows
+export TAVILY_API_KEY=tvly-your-key-here      # macOS/Linux (optional, for search fallback)
 
-# Option 2: .env file in project root
-echo "OPENAI_API_KEY=sk-your-key-here" > .env
+set OPENAI_API_KEY=sk-your-key-here           # Windows
+set TAVILY_API_KEY=tvly-your-key-here         # Windows (optional, for search fallback)
+
+# Option 2: .env file in project root (recommended)
+cat > .env << 'EOF'
+OPENAI_API_KEY=sk-your-key-here
+TAVILY_API_KEY=tvly-your-key-here
+EOF
 ```
+
+**API Keys:**
+
+| Key | Required | Free Tier | How to Get |
+|---|---|---|---|
+| `OPENAI_API_KEY` | Yes | Pay-as-you-go | [platform.openai.com](https://platform.openai.com/api-keys) |
+| `TAVILY_API_KEY` | No (but recommended) | 1000 queries/month | [tavily.com](https://tavily.com) |
+
+> **Note:** Without `TAVILY_API_KEY`, the system relies solely on DuckDuckGo for web search. DDG aggressively rate-limits automated requests, which can cause all web searches to fail. Adding a Tavily key ensures reliable fallback search.
 
 ### Running the Application
 
@@ -930,6 +973,7 @@ All configurable parameters in `config.py`:
 |---|---|---|
 | `MAX_SEARCH_RESULTS` | `8` | Maximum results per web search call |
 | `TRUSTED_DOMAINS` | 15 domains | Domains used by `search_trusted()` (reuters, bbc, ap, etc.) |
+| `TAVILY_API_KEY` | env variable | Tavily API key for fallback search when DDG is rate-limited |
 
 ### Storage
 
@@ -999,7 +1043,7 @@ The `VerificationResult.steps` field contains the complete agent trace. In the S
 ## Constraints and Limitations
 
 - **OpenAI API key required**: The system cannot function without a valid `OPENAI_API_KEY`
-- **DuckDuckGo rate limits**: Heavy usage may trigger rate limiting. The system handles this with exponential backoff but extended outages are possible
+- **DuckDuckGo rate limits**: Heavy usage may trigger DDG rate limiting (HTTP 202). The system automatically falls back to Tavily search when this happens. Set `TAVILY_API_KEY` for reliable web search
 - **English-only**: The system defaults to English language. Metadata `language` field exists for future multilingual support
 - **Snippet-level evidence**: Web search results are snippets (1-3 sentences), not full articles. This is by design for atomic evidence storage
 - **No real-time updates**: The KB grows only when verifications trigger web searches. There is no background ingestion pipeline

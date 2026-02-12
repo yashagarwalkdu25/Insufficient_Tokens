@@ -17,13 +17,13 @@
       position: fixed; z-index: 2147483647;
       left: ${Math.min(x, window.innerWidth - 160)}px;
       top: ${Math.max(y, 10)}px;
-      background: #1a73e8; color: #fff; border: none; border-radius: 8px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; border-radius: 8px;
       padding: 8px 16px; font-size: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-      transition: background 0.2s;
+      cursor: pointer; box-shadow: 0 4px 16px rgba(99,102,241,0.4);
+      transition: all 0.2s;
     `;
-    btn.addEventListener("mouseenter", () => (btn.style.background = "#1557b0"));
-    btn.addEventListener("mouseleave", () => (btn.style.background = "#1a73e8"));
+    btn.addEventListener("mouseenter", () => (btn.style.background = "linear-gradient(135deg, #4f46e5, #7c3aed)"));
+    btn.addEventListener("mouseleave", () => (btn.style.background = "linear-gradient(135deg, #6366f1, #8b5cf6)"));
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -116,11 +116,11 @@
       panel.innerHTML = `
         <div style="text-align:center; padding: 40px 0;">
           <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>
-          <h2 style="margin:0 0 8px; font-size:20px; color:#1a73e8;">Verifying Claim…</h2>
+          <h2 style="margin:0 0 8px; font-size:20px; color:#6366f1;">Verifying Claim…</h2>
           <p style="color:#666; font-size:14px; margin:0;">Retrieving evidence, reranking, cross-checking…</p>
           <p style="color:#999; font-size:13px; margin-top:12px; font-style:italic;">"${escapeHtml(claim.substring(0, 100))}${claim.length > 100 ? '…' : ''}"</p>
           <div style="margin-top:20px;">
-            <div style="display:inline-block; width:40px; height:40px; border:4px solid #e0e0e0; border-top-color:#1a73e8; border-radius:50%; animation:cv-spin 0.8s linear infinite;"></div>
+            <div style="display:inline-block; width:40px; height:40px; border:4px solid #e0e0e0; border-top-color:#6366f1; border-radius:50%; animation:cv-spin 0.8s linear infinite;"></div>
           </div>
         </div>
         <style>@keyframes cv-spin { to { transform: rotate(360deg); } }</style>
@@ -177,7 +177,7 @@
               <span style="color:#888;">Score: ${ev.score.toFixed(2)} ${credibilityStars}</span>
             </div>
             <p style="margin:0 0 4px; color:#333;">${escapeHtml(ev.text)}</p>
-            ${ev.source ? `<a href="${escapeHtml(ev.source)}" target="_blank" rel="noopener" style="color:#1a73e8; font-size:12px; text-decoration:none; word-break:break-all;">🔗 ${escapeHtml(ev.source)}</a>` : ""}
+            ${ev.source ? `<a href="${escapeHtml(ev.source)}" target="_blank" rel="noopener" style="color:#6366f1; font-size:12px; text-decoration:none; word-break:break-all;">🔗 ${escapeHtml(ev.source)}</a>` : ""}
           </div>`;
       });
       evidenceHTML += `</div>`;

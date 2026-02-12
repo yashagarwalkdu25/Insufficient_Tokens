@@ -12,7 +12,7 @@ class Reranker:
     """Reranks candidate documents using a cross-encoder model."""
 
     def __init__(self):
-        self._model = CrossEncoder(RERANKER_MODEL, max_length=512)
+        self._model = CrossEncoder(RERANKER_MODEL, max_length=512, device="cpu")
 
     def rerank(self, claim: str, candidates: list[dict],
                top_k: int = TOP_K_RERANK) -> list[dict]:

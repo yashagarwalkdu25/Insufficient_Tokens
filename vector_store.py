@@ -3,6 +3,7 @@ import time
 from urllib.parse import urlparse
 from typing import Optional
 import chromadb
+from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from config import (
     CHROMA_PERSIST_DIR, COLLECTION_NAME, EMBEDDING_MODEL,
@@ -14,8 +15,11 @@ class VectorStore:
     """Manages ChromaDB collection for news evidence with access-count boosting."""
 
     def __init__(self):
-        self._embedder = SentenceTransformer(EMBEDDING_MODEL)
-        self._client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
+        self._embedder = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
+        self._client = chromadb.PersistentClient(
+            path=CHROMA_PERSIST_DIR,
+            settings=Settings(anonymized_telemetry=False),
+        )
         self._collection = self._client.get_or_create_collection(
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},

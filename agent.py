@@ -132,8 +132,8 @@ class ClaimVerifier:
             all_evidence.extend(web_ev)
             steps.append(f"  → Found {len(web_ev)} web evidence(s)")
 
-            # Small delay between DDG searches to avoid rate-limiting
-            time.sleep(2)
+            # Delay between DDG searches to avoid rate-limiting
+            time.sleep(4)
 
             # Step 3b — Fact-checker search
             steps.append("Step 4: Searching fact-checkers…")
@@ -144,7 +144,7 @@ class ClaimVerifier:
             # Step 3c — Broad web if still thin (count only relevant evidence)
             relevant_so_far = [e for e in all_evidence if e.score > 0.0 or e.origin != "kb"]
             if len(relevant_so_far) < 2:
-                time.sleep(2)
+                time.sleep(4)
                 steps.append("Step 5: Still thin → broad web search…")
                 broad_ev = self._search_and_index(claim, search_fn=search_web)
                 all_evidence.extend(broad_ev)
@@ -391,7 +391,17 @@ Output ONLY valid JSON:
                     f"Relevance: {e.score:.2f})\n{e.text}\n\n"
                 )
 
-            system_prompt = f"""You are a rigorous fact-checking assistant. Analyse the claim against the provided evidence and produce a JSON response.
+            system_prompt = f"""You are a rigorous fact-checking assistant. Your job is to determine whether the CLAIM AS STATED is true or false based on the provided evidence.
+
+VERDICT DEFINITIONS — choose based on what the EVIDENCE says about the CLAIM AS STATED:
+- "True": The claim AS STATED is SUPPORTED/CONFIRMED by the evidence.
+- "False": The claim AS STATED is CONTRADICTED/DEBUNKED by the evidence.
+- "Partially True": The claim is partly correct but contains inaccuracies or is missing important context.
+- "Misleading": The claim is technically true but presented in a deceptive way.
+- "Not Enough Evidence": The evidence does not directly address the claim, or is insufficient.
+
+CRITICAL: Evaluate the EXACT claim given. If the claim says "X is Y" and the evidence says "X is NOT Y", the verdict MUST be "False", NOT "True".
+Example: Claim "The Earth is flat" + Evidence "The Earth is not flat, it is an oblate spheroid" → verdict MUST be "False".
 
 RULES:
 - You MUST cite sources using [1], [2], etc. matching the evidence numbers.
@@ -415,6 +425,15 @@ OUTPUT FORMAT (strict JSON):
         else:
             # No retrieved evidence — let the LLM use its own knowledge
             system_prompt = f"""You are a rigorous fact-checking assistant. No external evidence was found for this claim from the knowledge base or web searches.
+
+Your job is to determine whether the CLAIM AS STATED is true or false.
+
+VERDICT DEFINITIONS:
+- "True": The claim AS STATED is correct/accurate.
+- "False": The claim AS STATED is incorrect/wrong.
+- "Partially True": The claim is partly correct but contains inaccuracies.
+- "Misleading": The claim is technically true but presented deceptively.
+- "Not Enough Evidence": Cannot determine without external evidence.
 
 RULES:
 - If the claim is a mathematical fact, unit conversion, logical tautology, or widely-known definition that you can verify with certainty, provide a verdict based on your knowledge.

@@ -12,7 +12,7 @@
       color: #1a1a1a; background: #fff; overflow-y: auto;
     }
     .header {
-      background: linear-gradient(135deg, #1a73e8, #0d47a1);
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
       color: #fff; padding: 16px 20px;
     }
     .header h1 { font-size: 16px; font-weight: 700; }
@@ -25,14 +25,14 @@
       padding: 10px; font-size: 13px; resize: vertical; font-family: inherit;
       transition: border-color 0.2s;
     }
-    textarea:focus { outline: none; border-color: #1a73e8; }
+    textarea:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
     .btn {
-      width: 100%; padding: 10px; background: #1a73e8; color: #fff;
+      width: 100%; padding: 10px; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
       border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
-      cursor: pointer; transition: background 0.2s;
+      cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(99,102,241,0.35);
     }
-    .btn:hover { background: #1557b0; }
-    .btn:disabled { background: #94bef7; cursor: not-allowed; }
+    .btn:hover { background: linear-gradient(135deg, #4f46e5, #7c3aed); box-shadow: 0 6px 20px rgba(99,102,241,0.5); }
+    .btn:disabled { background: linear-gradient(135deg, #a5b4fc, #c4b5fd); cursor: not-allowed; box-shadow: none; }
     .status { text-align: center; padding: 12px; font-size: 13px; color: #666; }
     .status.error { color: #dc3545; }
     .status.ok { color: #28a745; }
@@ -51,12 +51,12 @@
     }
     .evidence-item .origin { font-weight: 600; color: #555; }
     .evidence-item .text { color: #333; margin: 4px 0; }
-    .evidence-item a { color: #1a73e8; text-decoration: none; font-size: 11px; word-break: break-all; }
+    .evidence-item a { color: #6366f1; text-decoration: none; font-size: 11px; word-break: break-all; }
     .section-title { font-size: 13px; font-weight: 700; color: #333; margin: 8px 0 6px; }
     .hint { font-size: 11px; color: #999; text-align: center; margin-top: 12px; }
     .spinner {
       display: inline-block; width: 20px; height: 20px;
-      border: 3px solid #e0e0e0; border-top-color: #1a73e8;
+      border: 3px solid #e0e0e0; border-top-color: #6366f1;
       border-radius: 50%; animation: spin 0.7s linear infinite;
       vertical-align: middle; margin-right: 6px;
     }

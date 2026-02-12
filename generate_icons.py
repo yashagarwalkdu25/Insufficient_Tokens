@@ -26,7 +26,7 @@ def create_png(width, height, rgba_data):
 
 
 def draw_icon(size):
-    """Draw a blue rounded-rect icon with a magnifying glass + checkmark."""
+    """Draw a purple rounded-rect icon with a magnifying glass + checkmark."""
     pixels = [0] * (size * size * 4)
 
     def set_pixel(x, y, r, g, b, a=255):
@@ -68,7 +68,7 @@ def draw_icon(size):
                     if dx*dx + dy*dy <= thickness*thickness:
                         set_pixel(int(px+dx), int(py+dy), r, g, b)
 
-    # Background: blue rounded rect (just fill whole thing blue)
+    # Background: purple gradient rounded rect
     corner_r = size * 0.15
     for y in range(size):
         for x in range(size):
@@ -83,7 +83,12 @@ def draw_icon(size):
             elif x >= size-corner_r and y >= size-corner_r:
                 inside = (x-(size-corner_r))**2 + (y-(size-corner_r))**2 <= corner_r**2
             if inside:
-                set_pixel(x, y, 26, 115, 232)  # #1a73e8
+                # Gradient from #6366f1 to #8b5cf6 (top-left to bottom-right)
+                t = (x + y) / (2 * size)
+                r = int(99 + (139 - 99) * t)   # 99 -> 139
+                g = int(102 + (92 - 102) * t)   # 102 -> 92
+                b = int(241 + (246 - 241) * t)  # 241 -> 246
+                set_pixel(x, y, r, g, b)
 
     s = size / 128.0  # scale factor
 
