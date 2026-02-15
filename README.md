@@ -23,7 +23,7 @@ A production-ready claim verification system built on an **Agentic Retrieval-Aug
    - 9.1 [Streamlit Web UI (`app.py`)](#91-streamlit-web-ui-apppy)
    - 9.2 [Flask REST API (`api.py`)](#92-flask-rest-api-apipy)
    - 9.3 [Chrome Extension (`chrome_extension/`)](#93-chrome-extension-chrome_extension)
-10. [Setup and Installation](#10-setup-and-installation)
+10. [Setup and Installation](#10-setup-and-installation) — [Deployment Guide](docs/DEPLOYMENT.md)
 11. [Project Structure](#11-project-structure)
 12. [Configuration Reference](#12-configuration-reference)
 13. [Development Guide](#13-development-guide)
@@ -34,107 +34,7 @@ A production-ready claim verification system built on an **Agentic Retrieval-Aug
 
 The system follows a multi-stage agentic pipeline where an LLM-powered agent orchestrates the verification process. The agent makes autonomous decisions at each stage — classifying the claim, retrieving evidence, judging sufficiency, triggering web searches when needed, and generating a final verdict.
 
-```
-                         USER INPUT
-              (claim / headline / text snippet)
-                            |
-                            v
-               +------------------------+
-               | 1. CLAIM CLASSIFIER    |  GPT-4o-mini classifies the claim
-               |    & EXTRACTOR         |  as FACTUAL / OPINION / MIXED /
-               |    (LLM Agent)         |  AMBIGUOUS and extracts the
-               +-----------|------------+  verifiable component
-                            |
-              OPINION?      |     AMBIGUOUS?
-          +-- return -------+------- return "Not Enough Evidence" --+
-          |  "Not Verifiable"       (ask user to clarify)           |
-          |                 |                                       |
-          |    FACTUAL or MIXED (extracted claim)                   |
-          |                 |                                       |
-          |                 v                                       |
-          |    +------------------------+                           |
-          |    | 2. KB RETRIEVAL        |  all-MiniLM-L6-v2 encodes |
-          |    |    (ChromaDB + HNSW)   |  claim -> cosine search   |
-          |    |    top-20 candidates   |  over ChromaDB with       |
-          |    +-----------|------------+  access-count boosting    |
-          |                 |                                       |
-          |                 v                                       |
-          |    +------------------------+                           |
-          |    | 3. CROSS-ENCODER       |  ms-marco-MiniLM-L-6-v2  |
-          |    |    RERANKING           |  reranks to top-5         |
-          |    |    + threshold filter  |  filters score < 0.3      |
-          |    +-----------|------------+                           |
-          |                 |                                       |
-          |                 v                                       |
-          |    +------------------------+                           |
-          |    | 4. SUFFICIENCY CHECK   |  Checks: >= 2 evidence?   |
-          |    |    (Agent Decision)    |  avg score >= 1.0?        |
-          |    +--------|--------|------+  LLM says "yes"?          |
-          |        YES  |        | NO                               |
-          |             |        v                                  |
-          |             | +------------------------+                |
-          |             | | 5a. TRUSTED NEWS       |  DuckDuckGo    |
-          |             | |     SEARCH             |  filtered to   |
-          |             | |                        |  reuters, bbc, |
-          |             | +-----------|------------+  ap, nyt...    |
-          |             |             |                              |
-          |             |          2s delay (rate-limit protection)  |
-          |             |             |                              |
-          |             |             v                              |
-          |             | +------------------------+                |
-          |             | | 5b. FACT-CHECKER       |  snopes.com    |
-          |             | |     SEARCH             |  factcheck.org |
-          |             | |                        |  politifact.com|
-          |             | +-----------|------------+                |
-          |             |             |                              |
-          |             |    Still < 2 relevant evidence?           |
-          |             |         YES |                              |
-          |             |          2s delay                         |
-          |             |             |                              |
-          |             |             v                              |
-          |             | +------------------------+                |
-          |             | | 5c. BROAD WEB SEARCH   |  Unrestricted  |
-          |             | |     (fallback)         |  DuckDuckGo    |
-          |             | +-----------|------------+                |
-          |             |             |                              |
-          |             |             v                              |
-          |             | +------------------------+                |
-          |             | | 5d. INDEX NEW EVIDENCE |  All web results|
-          |             | |     INTO KB            |  stored back    |
-          |             | +-----------|------------+  into ChromaDB  |
-          |             |             |              (ever-growing KB)|
-          |             v             v                              |
-          |    +------------------------+                           |
-          |    | 6. DEDUPLICATE         |  Remove near-duplicate    |
-          |    |    + FINAL RERANK      |  evidence, then rerank    |
-          |    |    (Cross-Encoder      |  ALL evidence together    |
-          |    |     + Credibility)     |  with credibility scoring |
-          |    +-----------|------------+                           |
-          |                 |                                       |
-          |                 v                                       |
-          |    +------------------------+                           |
-          |    | 7. LLM VERDICT         |  GPT-4o-mini generates    |
-          |    |    + CITATIONS         |  structured JSON verdict  |
-          |    |    + CONFIDENCE        |  with [N] citations and   |
-          |    |    + REASONING         |  confidence score         |
-          |    +-----------|------------+                           |
-          |                 |                                       |
-          +---------->     v  <---------+---------------------------+
-               +------------------------+
-               | RESULT OUTPUT          |  VerificationResult with:
-               | (VerificationResult)   |  verdict, confidence,
-               |                        |  reasoning, evidence[],
-               |                        |  steps[], session_id,
-               |                        |  claim_type
-               +------------------------+
-                            |
-                            v
-               +------------------------+
-               | STREAMLIT UI / API /   |  Colour-coded verdict,
-               | CHROME EXTENSION       |  evidence cards, agent
-               |                        |  trace log, credibility
-               +------------------------+  stars
-```
+![System Architecture](docs/System_Architechture.png)
 
 ### Tech Stack
 
@@ -811,12 +711,32 @@ Content Script (content.js)     Background Service Worker (background.js)
 
 ## 10. Setup and Installation
 
-### Prerequisites
+### Option 1: Docker (Recommended for Production)
+
+```bash
+# Clone the repository
+git clone <repo-url>
+cd W1_RAG
+
+# Create .env file with your OpenAI API key
+echo "OPENAI_API_KEY=sk-your-key-here" > .env
+
+# Deploy
+docker-compose up -d
+```
+
+**Access**: Streamlit UI at `http://localhost:8501`, API at `http://localhost:5001`
+
+**For AWS EC2 deployment**, see [Deployment Guide](docs/DEPLOYMENT.md)
+
+### Option 2: Local Development
+
+#### Prerequisites
 
 - Python 3.9+
 - An OpenAI API key (for GPT-4o-mini)
 
-### Installation
+#### Installation
 
 ```bash
 # Clone the repository

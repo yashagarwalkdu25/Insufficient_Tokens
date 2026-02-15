@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  claim-verifier:
+    build: .
+    container_name: claim-verifier
+    ports:
+      - "8501:8501"  # Streamlit UI
+      - "5001:5001"  # Flask API
+    environment:
+      # Local development (from .env)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+    volumes:
+      - ./chroma_db:/app/chroma_db  # Persist vector database
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5001/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
