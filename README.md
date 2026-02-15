@@ -83,6 +83,7 @@ When raw user input arrives, the system does NOT immediately search for evidence
 **Key design decision**: The system intentionally preserves factual errors in the extracted claim. If a user says "Water boils at 50C", the system does NOT correct it to 100C — it extracts "Water boils at 50C" as-is and verifies that claim against evidence, allowing the evidence to reveal the error.
 
 **Fallback behaviour**: If the LLM classification call fails (network error, API timeout, etc.), the system falls back to treating the input as `FACTUAL` and passes the raw text through. This ensures the system degrades gracefully rather than blocking.
+<img width="915" height="506" alt="Screenshot 2026-02-15 at 11 19 08 PM" src="https://github.com/user-attachments/assets/923074a7-046a-472d-8a46-cf6daf8b3252" />
 
 ### Step 2: Knowledge Base Retrieval
 
@@ -101,6 +102,7 @@ The normalised claim is encoded into a 384-dimensional dense vector using `all-M
 **Access-count boosting explained**: Each time a document is retrieved and passes the reranking threshold (i.e., it is actually relevant), its `access_count` metadata field is incremented by 1. On subsequent queries, each access adds a `0.02` score bonus. This means a document accessed 10 times gets a `+0.20` boost. This creates a positive feedback loop: frequently relevant evidence rises in ranking over time, making the system progressively better at surfacing high-quality evidence.
 
 **Important**: Access counts are ONLY incremented for documents that pass the cross-encoder reranking threshold (Step 3). This prevents irrelevant documents from accumulating false popularity.
+
 
 ### Step 3: Cross-Encoder Reranking
 
@@ -130,6 +132,8 @@ The agent decides whether the KB evidence alone is sufficient to verify the clai
 3. **LLM judgment**: GPT-4o-mini receives the claim and the top-5 evidence pieces (with their relevance scores) and answers a simple "yes" or "no" to whether the evidence is sufficient and directly relevant.
 
 All three conditions must pass for the agent to skip web search. If any condition fails, the agent proceeds to web search.
+
+<img width="1061" height="480" alt="Screenshot 2026-02-15 at 11 21 32 PM" src="https://github.com/user-attachments/assets/d88e2e76-67c5-4053-81c1-8ca3eb820ec4" />
 
 ### Step 5: Multi-Stage Web Search (Conditional)
 
@@ -164,6 +168,8 @@ When KB evidence is insufficient, the agent executes up to three web search stag
 
 **Automatic KB indexing**: Every web search result (snippet, URL, title) is immediately batch-indexed into ChromaDB via `add_documents_batch()`. This is the core mechanism of the ever-growing knowledge base. The next time a similar claim is verified, the system may find the answer in its KB without needing a web search.
 
+<img width="1067" height="534" alt="Screenshot 2026-02-15 at 11 22 30 PM" src="https://github.com/user-attachments/assets/0d075d2d-a326-4e90-a6a2-dc511f3edc6a" />
+
 ### Step 6: Deduplication and Final Reranking
 
 **Files**: `agent.py` — `_deduplicate()`, `_rerank_evidence()`, `reranker.py` — `rerank_with_credibility()`
@@ -192,6 +198,8 @@ The final reranking uses an enhanced pipeline that goes beyond pure relevance:
 4. **Source diversity enforcement**: A maximum of 2 results from the same domain are allowed. This prevents a single source from dominating the evidence list.
 5. **Threshold filtering**: Evidence with a relevance score (pre-credibility) below 0.3 is removed
 6. **Top-5 selection**: The final sorted, diverse, credibility-adjusted list is truncated to 5
+   
+<img width="1069" height="521" alt="Screenshot 2026-02-15 at 11 23 31 PM" src="https://github.com/user-attachments/assets/55642f1a-ac35-4f8d-b032-c121154759eb" />
 
 ### Step 7: LLM Verdict Generation
 
@@ -958,14 +966,3 @@ The `VerificationResult.steps` field contains the complete agent trace. In the S
 - How many web search results were found at each stage
 - How many total evidence pieces were reranked
 
----
-
-## Constraints and Limitations
-
-- **OpenAI API key required**: The system cannot function without a valid `OPENAI_API_KEY`
-- **DuckDuckGo rate limits**: Heavy usage may trigger DDG rate limiting (HTTP 202). The system automatically falls back to Tavily search when this happens. Set `TAVILY_API_KEY` for reliable web search
-- **English-only**: The system defaults to English language. Metadata `language` field exists for future multilingual support
-- **Snippet-level evidence**: Web search results are snippets (1-3 sentences), not full articles. This is by design for atomic evidence storage
-- **No real-time updates**: The KB grows only when verifications trigger web searches. There is no background ingestion pipeline
-- **Chrome Extension requires localhost**: The extension communicates with `http://localhost:5000` (hardcoded in `background.js`). This must be changed for production deployment
-- **CORS wide open**: The Flask API allows all origins (`CORS(app)`). Restrict this in production
