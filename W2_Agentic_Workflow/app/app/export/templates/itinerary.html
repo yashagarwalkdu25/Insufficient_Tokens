@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>TripSaathi — {{ trip.destination }}</title>
+  <style>
+    @page { margin: 2cm; }
+    :root { --ts-teal:#1A5653; --ts-saffron:#E8772E; --ts-gold:#C5A55A; --ts-cream:#FAF6F0; --ts-text:#1E2832; --ts-border:#E8E2D8; }
+    body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; color: var(--ts-text); font-size: 11pt; }
+    .cover { text-align: center; padding: 2cm 0; }
+    .cover h1 { font-family: 'Cormorant Garamond', serif; color: var(--ts-teal); font-size: 28pt; margin: 0; }
+    .cover .tagline { color: var(--ts-gold); font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 12pt; }
+    .cover .dates { color: var(--ts-saffron); font-size: 14pt; margin: 0.5em 0; }
+    .cover .vibe { font-size: 18pt; margin: 0.5em 0; }
+    .cover .vibe-tagline { font-style: italic; color: #7A8B8A; }
+    .gold-line { width: 60px; height: 2px; background: var(--ts-gold); margin: 0.6em auto; }
+    .section { page-break-before: always; margin-top: 1em; }
+    .section:first-of-type { page-break-before: auto; }
+    h2 { font-family: 'Cormorant Garamond', serif; color: var(--ts-teal); border-bottom: 2px solid var(--ts-saffron); padding-bottom: 4px; }
+    .day-card { border-left: 4px solid var(--ts-saffron); padding-left: 12px; margin: 12px 0; }
+    .item { margin: 6px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+    th, td { border: 1px solid var(--ts-border); padding: 8px; text-align: left; }
+    th { background: var(--ts-cream); }
+    .qr { width: 80px; height: 80px; }
+    .booking-row { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="cover">
+    <h1>TripSaathi</h1>
+    <p class="tagline">Har journey ka intelligent dost.</p>
+    <div class="gold-line"></div>
+    <h2 style="border:none; margin-top:0.6em;">{{ trip.destination }}</h2>
+    <p class="dates">{{ trip.start_date }} to {{ trip.end_date }}</p>
+    <p class="vibe">Vibe score: {{ vibe_score.overall_score | default('—') }}/100</p>
+    <p class="vibe-tagline">{{ vibe_score.tagline | default('') }}</p>
+    {% if qr_base64 %}<p><img src="data:image/png;base64,{{ qr_base64 }}" class="qr" alt="QR"/></p>{% endif %}
+  </div>
+
+  <div class="section">
+    <h2>Trip overview</h2>
+    <p><strong>Destination:</strong> {{ trip.destination }} &nbsp; <strong>Origin:</strong> {{ trip.origin }}</p>
+    <p><strong>Style:</strong> {{ trip.travel_style }} &nbsp; <strong>Travelers:</strong> {{ trip.traveler_type }}</p>
+    <p><strong>Total budget:</strong> ₹{{ "%.0f" | format(trip.total_cost | default(0)) }}</p>
+  </div>
+
+  {% for day in trip.days or [] %}
+  <div class="section day-card">
+    <h2>Day {{ day.day_number }} — {{ day.date }} — {{ day.title }}</h2>
+    <p>Day total: ₹{{ "%.0f" | format(day.day_cost | default(0)) }}</p>
+    {% for item in day.items or [] %}
+    <div class="item">{{ item.time }} <strong>{{ item.title }}</strong> — ₹{{ "%.0f" | format(item.cost | default(0)) }}</div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  {% if budget_tracker and budget_tracker.categories %}
+  <div class="section">
+    <h2>Budget</h2>
+    <table>
+      <tr><th>Category</th><th>Allocated</th><th>Spent</th><th>Remaining</th></tr>
+      {% for c in budget_tracker.categories %}
+      <tr><td>{{ c.category }}</td><td>₹{{ "%.0f" | format(c.allocated) }}</td><td>₹{{ "%.0f" | format(c.spent) }}</td><td>₹{{ "%.0f" | format(c.remaining) }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  {% if booking_links %}
+  <div class="section">
+    <h2>Booking links</h2>
+    {% for bl in booking_links %}
+    <div class="booking-row">
+      <strong>{{ bl.name }}</strong> — {{ bl.price_text }} — <a href="{{ bl.url }}">{{ bl.url }}</a>
+      {% if bl.qr_base64 %}<img src="data:image/png;base64,{{ bl.qr_base64 }}" class="qr" alt="QR"/>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if hidden_gems %}
+  <div class="section">
+    <h2>Hidden gems</h2>
+    {% for g in hidden_gems %}
+    <p><strong>{{ g.name }}</strong> — {{ g.why_special | default('') }}. Pro tip: {{ g.pro_tip | default('') }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+</body>
+</html>

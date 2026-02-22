@@ -1,0 +1,62 @@
+# ── Virtual environments ──────────────────────────
+venv/
+.venv/
+env/
+
+# ── Environment variables / secrets ───────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# ── ChromaDB persistent storage ──────────────────
+chroma_db/
+
+# ── IDE / Editor ─────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Claude / Cursor ──────────────────────────────
+.claude/
+
+# ── Streamlit ────────────────────────────────────
+.streamlit/
+
+# ── Logs ─────────────────────────────────────────
+*.log
+
+# ── Byte-compiled / optimized ────────────────────
+*.pyc
+*.pyo
+
+# ── Distribution / packaging ─────────────────────
+*.whl
+*.tar.gz
+
+# ── AWS EC2 ─────────────────────────────────────
+*.pem
+
+# ── Tests ────────────────────────────────────────
+tests/
+demo/
+
+# ── Streamlit ───────────────────────────────────
+.streamlit/
+
+# ── db ─────────────────────────────────────────
+yatra.db
