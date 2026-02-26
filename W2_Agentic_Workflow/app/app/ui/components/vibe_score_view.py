@@ -30,25 +30,27 @@ def render_vibe_score(vibe_score: dict[str, Any] | None) -> None:
                 mode="gauge",
                 value=score,
                 domain={"x": [0.15, 0.85], "y": [0.1, 0.6]},
-                number={"font": {"family": "Cormorant Garamond", "size": 28, "color": "#1A5653"}},
+                number={"font": {"family": "Cormorant Garamond", "size": 28, "color": "#1E3A6E"}},
                 gauge={
-                    "axis": {"range": [0, 100], "tickcolor": "#E8E2D8"},
-                    "bar": {"color": "#1A5653", "thickness": 0.35},
-                    "bgcolor": "#FAF6F0",
+                    "axis": {"range": [0, 100], "tickcolor": "#DDD5EF",
+                             "tickfont": {"color": "#1A1D3A"}},
+                    "bar": {"color": "#1E3A6E", "thickness": 0.35},
+                    "bgcolor": "#F3F0FA",
                     "borderwidth": 0,
                     "steps": [
                         {"range": [0, 33], "color": "rgba(196,77,77,0.12)"},
-                        {"range": [33, 66], "color": "rgba(197,165,90,0.12)"},
+                        {"range": [33, 66], "color": "rgba(123,92,184,0.10)"},
                         {"range": [66, 100], "color": "rgba(45,139,95,0.12)"},
                     ],
-                    "threshold": {"line": {"color": "#E8772E", "width": 3}, "value": 90},
+                    "threshold": {"line": {"color": "#6B3FA0", "width": 3}, "value": 90},
                 },
             ))
             fig.update_layout(
                 height=220,
                 margin=dict(l=20, r=20, t=20, b=20),
                 paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(family="Plus Jakarta Sans"),
+                font=dict(family="Plus Jakarta Sans, system-ui, sans-serif",
+                          color="#1A1D3A"),
                 annotations=[
                     dict(
                         text=f"<b>{score}</b><br>/100",
@@ -57,7 +59,7 @@ def render_vibe_score(vibe_score: dict[str, Any] | None) -> None:
                         xref="paper",
                         yref="paper",
                         showarrow=False,
-                        font=dict(family="Cormorant Garamond", size=32, color="#1A5653"),
+                        font=dict(family="Cormorant Garamond", size=32, color="#1E3A6E"),
                         align="center",
                     ),
                 ],
@@ -85,7 +87,7 @@ def render_vibe_score(vibe_score: dict[str, Any] | None) -> None:
             for name, val in breakdown.items():
                 label = name.replace("_", " ").title()
                 pct = min(max(val, 0), 100)
-                color = "#2D8B5F" if pct >= 70 else "#C5A55A" if pct >= 40 else "#C44D4D"
+                color = "#2D8B5F" if pct >= 70 else "#7B5CB8" if pct >= 40 else "#C44D4D"
                 st.markdown(
                     f'<div style="margin:6px 0;">'
                     f'<div style="display:flex; justify-content:space-between; font-size:0.85rem;">'

@@ -53,6 +53,8 @@ def _geocode_city(city_name: str) -> tuple[float | None, float | None]:
                     f"Return ONLY a JSON object: {{\"latitude\": <float>, \"longitude\": <float>}}"
                 )}],
                 temperature=0.0,
+                max_tokens=60,
+                timeout=10,
             )
             content = (resp.choices[0].message.content or "").strip()
             if "```" in content:

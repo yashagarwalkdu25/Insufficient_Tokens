@@ -2,7 +2,7 @@
 TripSaathi design system.
 Brand: "Har journey ka intelligent dost."
 Aesthetic: Warm editorial travel-journal — Cormorant Garamond + Plus Jakarta Sans,
-deep teal / saffron / antique gold on warm parchment.
+deep navy / rich purple / violet on soft lavender-cream parchment.
 """
 
 CSS = """
@@ -13,22 +13,22 @@ CSS = """
 
 /* ─── Design Tokens ────────────────────────────────────────── */
 :root {
-  --ts-teal:      #1A5653;
-  --ts-teal-light:#2A7A76;
-  --ts-saffron:   #E8772E;
-  --ts-saffron-light: #F09A5B;
-  --ts-gold:      #C5A55A;
-  --ts-gold-light:#DFC983;
-  --ts-cream:     #FAF6F0;
+  --ts-teal:      #1E3A6E;
+  --ts-teal-light:#2E55A0;
+  --ts-saffron:   #6B3FA0;
+  --ts-saffron-light: #8B60C0;
+  --ts-gold:      #7B5CB8;
+  --ts-gold-light:#A08FD0;
+  --ts-cream:     #F3F0FA;
   --ts-surface:   #FFFFFF;
-  --ts-text:      #1E2832;
-  --ts-text-muted:#7A8B8A;
+  --ts-text:      #1A1D3A;
+  --ts-text-muted:#6B7090;
   --ts-success:   #2D8B5F;
   --ts-warning:   #D4943A;
   --ts-danger:    #C44D4D;
-  --ts-border:    #E8E2D8;
-  --ts-shadow:    0 2px 16px rgba(26,86,83,0.08);
-  --ts-shadow-hover: 0 6px 24px rgba(26,86,83,0.14);
+  --ts-border:    #DDD5EF;
+  --ts-shadow:    0 2px 16px rgba(30,58,110,0.08);
+  --ts-shadow-hover: 0 6px 24px rgba(30,58,110,0.16);
   --ts-radius:    14px;
   --ts-font-display: 'Cormorant Garamond', Georgia, serif;
   --ts-font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
@@ -43,9 +43,10 @@ div[data-testid="stTextInput"] input,
 .stApp .stTextInput input,
 .stApp [data-testid="stTextInput"] input {
   background-color: #FFFFFF !important;
-  color: #1E2832 !important;
+  color: #1A1D3A !important;
   border: 1px solid var(--ts-border) !important;
   border-radius: 10px !important;
+  caret-color: #1E3A6E !important;
 }
 [data-testid="stTextInput"] input::placeholder,
 .stTextInput input::placeholder {
@@ -58,9 +59,10 @@ div[data-testid="stTextArea"] textarea,
 .stApp .stTextArea textarea,
 .stApp [data-testid="stTextArea"] textarea {
   background-color: #FFFFFF !important;
-  color: #1E2832 !important;
+  color: #1A1D3A !important;
   border: 1px solid var(--ts-border) !important;
   border-radius: 10px !important;
+  caret-color: #1E3A6E !important;
 }
 [data-testid="stTextArea"] textarea::placeholder,
 .stTextArea textarea::placeholder {
@@ -69,9 +71,10 @@ div[data-testid="stTextArea"] textarea,
 [data-testid="stNumberInput"] input,
 .stApp [data-testid="stNumberInput"] input {
   background-color: #FFFFFF !important;
-  color: #1E2832 !important;
+  color: #1A1D3A !important;
   border: 1px solid var(--ts-border) !important;
   border-radius: 10px !important;
+  caret-color: #1E3A6E !important;
 }
 [data-testid="stButton"] > button,
 .stButton > button {
@@ -86,6 +89,17 @@ button[data-testid="baseButton-primary"] {
   background: linear-gradient(135deg, var(--ts-teal) 0%, var(--ts-teal-light) 100%) !important;
   border: none !important;
   color: #FFFFFF !important;
+  -webkit-text-fill-color: #FFFFFF !important;
+}
+.stApp [data-testid="stButton"] > button[kind="primary"] *,
+.stApp .stButton > button[kind="primary"] *,
+.stApp button[data-testid="baseButton-primary"] *,
+.stApp [data-testid="stButton"] > button[kind="primary"] span,
+.stApp .stButton > button[kind="primary"] span,
+.stApp button[data-testid="baseButton-primary"] span,
+.stApp [data-testid="stButton"] > button[kind="primary"] p {
+  color: #FFFFFF !important;
+  -webkit-text-fill-color: #FFFFFF !important;
 }
 [data-testid="stButton"] > button:not([kind="primary"]),
 .stButton > button:not([kind="primary"]),
@@ -95,25 +109,67 @@ button[data-testid="baseButton-primary"] {
   color: var(--ts-teal) !important;
 }
 
+/* ─── Selectbox / multiselect: no text cursor on trigger ───── */
+[data-testid="stSelectbox"] [data-baseweb="select"],
+[data-testid="stSelectbox"] [data-baseweb="select"] *,
+[data-testid="stMultiSelect"] [data-baseweb="select"],
+[data-testid="stMultiSelect"] [data-baseweb="select"] * {
+  cursor: pointer !important;
+}
+/* The hidden combobox input inside baseweb select must not show text cursor */
+[data-baseweb="select"] input[role="combobox"] {
+  cursor: pointer !important;
+  caret-color: transparent !important;
+}
+
 /* ─── Selectbox, multiselect, slider: light theme ──────────── */
 [data-testid="stSelectbox"] > div,
 [data-testid="stSelectbox"] [data-baseweb="select"] > div,
 .stApp [data-baseweb="select"] > div {
   background-color: #FFFFFF !important;
-  color: #1E2832 !important;
+  color: #1A1D3A !important;
   border: 1px solid var(--ts-border) !important;
   border-radius: 10px !important;
+}
+/* Selectbox trigger value text */
+[data-testid="stSelectbox"] [data-baseweb="select"] span,
+[data-testid="stSelectbox"] [data-baseweb="select"] div,
+.stApp [data-baseweb="select"] [data-baseweb="select"] > div > div {
+  color: #1A1D3A !important;
 }
 [data-testid="stMultiSelect"] > div,
 [data-testid="stMultiSelect"] [data-baseweb="select"] > div,
 .stApp [data-baseweb="select"] input {
   background-color: #FFFFFF !important;
-  color: #1E2832 !important;
+  color: #1A1D3A !important;
   border-color: var(--ts-border) !important;
   border-radius: 10px !important;
 }
+/* Dropdown popover / menu items */
+[data-baseweb="popover"],
+[data-baseweb="popover"] > div,
+[data-baseweb="menu"],
+[data-baseweb="list"] {
+  background-color: #FFFFFF !important;
+  color: #1A1D3A !important;
+  border: 1px solid var(--ts-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--ts-shadow-hover) !important;
+}
+[data-baseweb="option"],
+[data-baseweb="menu"] li,
+[role="option"] {
+  background-color: #FFFFFF !important;
+  color: #1A1D3A !important;
+}
+[data-baseweb="option"]:hover,
+[data-baseweb="menu"] li:hover,
+[role="option"]:hover {
+  background-color: rgba(30,58,110,0.06) !important;
+  color: var(--ts-teal) !important;
+}
 .stApp [data-baseweb="tag"] {
-  background: rgba(26,86,83,0.12) !important;
+  background: rgba(30,58,110,0.12) !important;
   color: var(--ts-teal) !important;
   border-radius: 6px !important;
 }
@@ -132,13 +188,17 @@ button[data-testid="baseButton-primary"] {
   background-image: var(--ts-grain);
   background-size: 200px 200px;
 }
-/* Remove top gap so hero sits at top */
+/* Remove top gap so hero sits at top; constrain width to readable column */
 .stApp .block-container,
 .stApp [data-testid="stAppViewBlockContainer"],
 section[data-testid="stAppViewContainer"] > div:first-child,
 section.main .block-container {
   padding-top: 0 !important;
-  max-width: 100%;
+  max-width: 860px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: 2rem !important;
+  padding-right: 2rem !important;
 }
 .stApp, .stApp p, .stApp li, .stApp span, .stApp label {
   font-family: var(--ts-font-body) !important;
@@ -155,7 +215,7 @@ section.main .block-container {
 
 /* ─── Hero Header ──────────────────────────────────────────── */
 .ts-hero {
-  background: linear-gradient(135deg, var(--ts-teal) 0%, #0F3D3B 60%, var(--ts-teal-light) 100%);
+  background: linear-gradient(135deg, #1E3A6E 0%, #152648 50%, #4A2880 100%);
   padding: 2.2rem 2.4rem 1.8rem;
   border-radius: var(--ts-radius);
   color: #FFF;
@@ -171,9 +231,12 @@ section.main .block-container {
   opacity: 0.12;
   pointer-events: none;
 }
-.ts-hero h1 {
+.ts-hero h1,
+.stApp .ts-hero h1,
+div.ts-hero h1 {
   font-family: var(--ts-font-display) !important;
-  color: #FFF !important;
+  color: #FFFFFF !important;
+  -webkit-text-fill-color: #FFFFFF !important;
   font-size: 2.6rem !important;
   margin: 0 0 0.15rem 0;
   letter-spacing: -0.03em;
@@ -231,17 +294,17 @@ section.main .block-container {
   border-radius: 12px;
   padding: 1rem 1.15rem;
   margin: 0.6rem 0;
-  box-shadow: 0 1px 6px rgba(26,86,83,0.06);
+  box-shadow: 0 1px 6px rgba(30,58,110,0.06);
   transition: all 0.2s ease;
 }
 .ts-tip-card:hover {
   border-color: var(--ts-saffron-light);
-  box-shadow: 0 3px 12px rgba(232,119,46,0.1);
+  box-shadow: 0 3px 12px rgba(107,63,160,0.12);
 }
 .ts-gem-card {
   border-left: 4px solid var(--ts-gold);
   padding-left: 14px;
-  background: linear-gradient(90deg, rgba(197,165,90,0.06) 0%, transparent 40%);
+  background: linear-gradient(90deg, rgba(123,92,184,0.06) 0%, transparent 40%);
 }
 .ts-event-positive { border-left: 4px solid var(--ts-success); padding-left: 12px; }
 .ts-event-neutral  { border-left: 4px solid var(--ts-gold); padding-left: 12px; }
@@ -263,11 +326,11 @@ section.main .block-container {
   font-size: 1.1rem;
   flex-shrink: 0;
 }
-.ts-icon-transport { background: #E8F4FD; }
-.ts-icon-hotel     { background: #FDF2E8; }
+.ts-icon-transport { background: #E4EBF8; }
+.ts-icon-hotel     { background: #EDE8F8; }
 .ts-icon-activity  { background: #E8F5EC; }
-.ts-icon-meal      { background: #FFF3E6; }
-.ts-icon-free      { background: #F0EBF8; }
+.ts-icon-meal      { background: #F0EBFA; }
+.ts-icon-free      { background: #F3F0FA; }
 .ts-itin-time {
   font-family: var(--ts-font-body) !important;
   font-size: 0.82rem;
@@ -289,7 +352,7 @@ section.main .block-container {
 }
 .ts-travel-badge {
   display: inline-flex; align-items: center; gap: 4px;
-  background: var(--ts-cream);
+  background: rgba(30,58,110,0.06);
   border: 1px solid var(--ts-border);
   border-radius: 20px;
   padding: 3px 10px;
@@ -303,7 +366,7 @@ section.main .block-container {
   display: inline-block;
   padding: 5px 14px;
   border-radius: 20px;
-  background: rgba(26,86,83,0.08);
+  background: rgba(30,58,110,0.08);
   color: var(--ts-teal);
   font-size: 0.82rem;
   font-weight: 500;
@@ -318,8 +381,8 @@ section.main .block-container {
   border-color: var(--ts-teal);
 }
 .ts-pill-gold {
-  background: rgba(197,165,90,0.12);
-  color: #8B7330;
+  background: rgba(123,92,184,0.10);
+  color: #5A3A8A;
 }
 .ts-pill-gold:hover {
   background: var(--ts-gold);
@@ -360,12 +423,12 @@ section.main .block-container {
 .ts-dest-btn > button:hover {
   border-color: var(--ts-saffron) !important;
   color: var(--ts-saffron) !important;
-  background: rgba(232,119,46,0.04) !important;
+  background: rgba(107,63,160,0.04) !important;
 }
 
 /* ─── Quick Action Chips (sidebar) ─────────────────────────── */
 .ts-action-chip > button {
-  background: rgba(26,86,83,0.06) !important;
+  background: rgba(30,58,110,0.06) !important;
   border: 1px solid var(--ts-border) !important;
   color: var(--ts-teal) !important;
   font-size: 0.82rem !important;
@@ -390,7 +453,7 @@ section.main .block-container {
   border-left: 3px solid var(--ts-success);
 }
 .ts-timeline-active {
-  background: linear-gradient(90deg, rgba(232,119,46,0.08) 0%, transparent 60%);
+  background: linear-gradient(90deg, rgba(107,63,160,0.08) 0%, transparent 60%);
   border-left: 3px solid var(--ts-saffron);
   animation: ts-pulse 2s ease-in-out infinite;
 }
@@ -434,7 +497,7 @@ section.main .block-container {
   border-radius: 12px;
   padding: 1.1rem;
   text-align: center;
-  box-shadow: 0 1px 4px rgba(26,86,83,0.05);
+  box-shadow: 0 1px 4px rgba(30,58,110,0.05);
 }
 .ts-metric-value {
   font-family: var(--ts-font-display) !important;
@@ -458,7 +521,7 @@ section.main .block-container {
 .stTabs [data-baseweb="tab"] {
   font-family: var(--ts-font-body) !important;
   font-weight: 500;
-  color: #1E2832 !important;
+  color: #1A1D3A !important;
   padding: 0.6rem 1.2rem;
   border-bottom: 3px solid transparent;
   transition: all 0.2s ease;
@@ -471,7 +534,7 @@ section.main .block-container {
 
 /* ─── Sidebar ──────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-  background: #F7F3EC !important;
+  background: #EEE9F7 !important;
   border-right: 1px solid var(--ts-border);
 }
 [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
@@ -509,7 +572,7 @@ section.main .block-container {
 [data-testid="stExpander"] {
   border: 1px solid var(--ts-border) !important;
   border-radius: var(--ts-radius) !important;
-  box-shadow: 0 1px 4px rgba(26,86,83,0.04);
+  box-shadow: 0 1px 4px rgba(30,58,110,0.04);
   margin-bottom: 0.5rem;
   background: var(--ts-surface) !important;
 }
@@ -529,18 +592,41 @@ section.main .block-container {
 [data-testid="stExpander"] summary *,
 .stApp [data-testid="stExpander"] summary,
 .stApp [data-testid="stExpander"] summary * {
-  color: #1E2832 !important;
-  -webkit-text-fill-color: #1E2832 !important;
+  color: #1A1D3A !important;
+  -webkit-text-fill-color: #1A1D3A !important;
   font-family: var(--ts-font-body) !important;
   font-weight: 600 !important;
 }
-/*
- * Hide the FIRST span child of summary — this is the icon element.
- * The SECOND span (or last-child) is the label — keep it visible.
- * This works because Streamlit renders: <summary><span>icon</span><span>label</span></summary>
- */
-[data-testid="stExpander"] summary > span:first-child {
+/* Hide the Material icon ligature text inside expander summary */
+[data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+[data-testid="stExpander"] summary [data-testid="stExpanderToggleIcon"],
+[data-testid="stExpander"] summary span[class*="emntfgb"] {
   display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  font-size: 0 !important;
+  visibility: hidden !important;
+}
+/* Custom expand/collapse arrow via ::after on the summary */
+[data-testid="stExpander"] summary {
+  position: relative;
+  padding-right: 2.2rem !important;
+}
+[data-testid="stExpander"] summary::after {
+  content: '›';
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%) rotate(90deg);
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--ts-teal);
+  transition: transform 0.2s ease;
+  pointer-events: none;
+}
+[data-testid="stExpander"] details[open] summary::after {
+  transform: translateY(-50%) rotate(270deg);
 }
 /* Expander body: ensure content text is visible */
 [data-testid="stExpander"] [data-testid="stExpanderDetails"],
@@ -551,7 +637,7 @@ section.main .block-container {
 [data-testid="stExpander"] [data-testid="stExpanderDetails"] *,
 [data-testid="stExpander"] details > div,
 [data-testid="stExpander"] details > div * {
-  color: #1E2832 !important;
+  color: #1A1D3A !important;
 }
 
 /* ─── Gold Separator ───────────────────────────────────────── */
@@ -565,7 +651,7 @@ section.main .block-container {
 
 /* ─── Approval Card ────────────────────────────────────────── */
 .ts-approval-card {
-  background: linear-gradient(135deg, rgba(26,86,83,0.04) 0%, rgba(197,165,90,0.06) 100%);
+  background: linear-gradient(135deg, rgba(30,58,110,0.04) 0%, rgba(123,92,184,0.06) 100%);
   border: 2px solid var(--ts-gold);
   border-radius: var(--ts-radius);
   padding: 1.8rem 2rem;
@@ -579,6 +665,46 @@ section.main .block-container {
   border-radius: var(--ts-radius);
   padding: 1.5rem;
   box-shadow: var(--ts-shadow);
+  margin-bottom: 1rem;
+}
+.ts-share-url {
+  background: rgba(30,58,110,0.05);
+  border: 1px solid var(--ts-border);
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  font-family: var(--ts-font-body);
+  font-size: 0.88rem;
+  color: var(--ts-teal);
+  word-break: break-all;
+  user-select: all;
+}
+/* Override Streamlit's dark code block background */
+.stApp [data-testid="stCode"],
+.stApp [data-testid="stCode"] pre,
+.stApp [data-testid="stCode"] code,
+.stApp .stCode pre,
+.stApp .stCode code {
+  background-color: rgba(30,58,110,0.05) !important;
+  color: var(--ts-teal) !important;
+  border: 1px solid var(--ts-border) !important;
+  border-radius: 8px !important;
+}
+
+/* ─── Budget number input: hide +/- steppers, align with slider ── */
+.stApp [data-testid="stNumberInput"] button,
+.stApp [data-testid="stNumberInput"] [data-testid="stNumberInputStepDown"],
+.stApp [data-testid="stNumberInput"] [data-testid="stNumberInputStepUp"],
+.stApp [data-baseweb="input"] button {
+  display: none !important;
+}
+/* Remove extra top margin so number box sits level with the slider */
+.stApp [data-testid="stNumberInput"] {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+.stApp [data-testid="stNumberInput"] label {
+  margin-bottom: 0.15rem !important;
+  font-size: 0.82rem !important;
 }
 
 /* ─── Metrics Override ─────────────────────────────────────── */
@@ -596,7 +722,7 @@ section.main .block-container {
 
 /* ─── Map view: folium iframe and container ─────────────────── */
 .stApp iframe {
-  background: #FAF6F0 !important;
+  background: #F3F0FA !important;
 }
 .ts-map-container {
   background: var(--ts-cream) !important;
@@ -606,16 +732,16 @@ section.main .block-container {
   min-height: 400px;
 }
 
-/* ─── NUCLEAR: hide ALL Material Symbol icon text everywhere ── */
-/* Streamlit renders icons with font-family: "Material Symbols Rounded".
-   When the font fails to load, ligatures render as plain text.
-   Target via inline style attribute AND class name. */
-[style*="Material Symbols"],
-[style*="material-symbols"],
+/* ─── Hide Material Symbol icon text (font-load fallback) ──── */
+/* Only target elements that explicitly declare the Material Symbols font
+   via inline style — avoids hiding Streamlit widget text. */
+[style*="Material Symbols Rounded"],
+[style*="Material Symbols Outlined"],
+[style*="material-symbols-rounded"],
+[style*="material-symbols-outlined"],
 .material-symbols-rounded,
 .material-symbols-outlined,
 .material-symbols,
-span[class*="Icon"],
 [data-testid="stExpanderToggleIcon"] {
   display: none !important;
   font-size: 0 !important;
@@ -687,7 +813,13 @@ header[data-testid="stHeader"] {
 }
 
 /* ─── Responsive ───────────────────────────────────────────── */
-@media (max-width: 768px) {
+@media (max-width: 900px) {
+  .stApp .block-container,
+  .stApp [data-testid="stAppViewBlockContainer"] {
+    max-width: 100% !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
   .ts-hero { padding: 1.4rem 1.2rem 1.2rem; }
   .ts-hero h1 { font-size: 1.8rem !important; }
   .ts-card { padding: 1rem; }
@@ -700,30 +832,54 @@ LATE_OVERRIDES_CSS = """
 <style>
 /* Text inputs & textareas */
 [data-testid="stTextInput"] input, .stTextInput input,
-.stApp input[type="text"], .stApp input[type="email"] { background-color: #FFFFFF !important; color: #1E2832 !important; border: 1px solid #E8E2D8 !important; border-radius: 10px !important; }
+.stApp input[type="text"], .stApp input[type="email"] { background-color: #FFFFFF !important; color: #1A1D3A !important; border: 1px solid #DDD5EF !important; border-radius: 10px !important; caret-color: #1E3A6E !important; }
 [data-testid="stTextArea"] textarea, .stTextArea textarea,
-.stApp textarea { background-color: #FFFFFF !important; color: #1E2832 !important; border: 1px solid #E8E2D8 !important; border-radius: 10px !important; }
-[data-testid="stNumberInput"] input, .stApp input[type="number"] { background-color: #FFFFFF !important; color: #1E2832 !important; border: 1px solid #E8E2D8 !important; border-radius: 10px !important; }
-[data-testid="stDateInput"] input { background-color: #FFFFFF !important; color: #1E2832 !important; border: 1px solid #E8E2D8 !important; border-radius: 10px !important; }
+.stApp textarea { background-color: #FFFFFF !important; color: #1A1D3A !important; border: 1px solid #DDD5EF !important; border-radius: 10px !important; caret-color: #1E3A6E !important; }
+[data-testid="stNumberInput"] input, .stApp input[type="number"] { background-color: #FFFFFF !important; color: #1A1D3A !important; border: 1px solid #DDD5EF !important; border-radius: 10px !important; caret-color: #1E3A6E !important; }
+[data-testid="stDateInput"] input { background-color: #FFFFFF !important; color: #1A1D3A !important; border: 1px solid #DDD5EF !important; border-radius: 10px !important; caret-color: #1E3A6E !important; }
 /* Selectbox & multiselect: light background */
 [data-testid="stSelectbox"] > div, [data-testid="stSelectbox"] [data-baseweb="select"] > div,
 [data-testid="stMultiSelect"] > div, [data-testid="stMultiSelect"] [data-baseweb="select"] > div,
-.stApp [data-baseweb="select"] > div { background-color: #FFFFFF !important; color: #1E2832 !important; border: 1px solid #E8E2D8 !important; border-radius: 10px !important; }
-/* Buttons: primary = teal, rest = white with teal border */
-[data-testid="stButton"] > button[kind="primary"], .stButton > button[kind="primary"], button[data-testid="baseButton-primary"] { background: linear-gradient(135deg, #1A5653 0%, #2A7A76 100%) !important; border: none !important; color: #FFFFFF !important; }
-[data-testid="stButton"] > button, .stButton > button { background: #FFFFFF !important; border: 1.5px solid #E8E2D8 !important; color: #1A5653 !important; }
-[data-testid="stButton"] > button[kind="primary"], .stButton > button[kind="primary"], button[data-testid="baseButton-primary"] { background: linear-gradient(135deg, #1A5653 0%, #2A7A76 100%) !important; color: #FFFFFF !important; }
-/* Expander: dark text + hide first span (icon) in summary */
-[data-testid="stExpander"] summary, [data-testid="stExpander"] summary * { color:#1E2832!important; -webkit-text-fill-color:#1E2832!important; background:#FFFFFF!important; font-weight:600!important; }
-[data-testid="stExpander"] summary > span:first-child { display:none!important; }
-[data-testid="stExpander"] [data-testid="stExpanderDetails"], [data-testid="stExpander"] [data-testid="stExpanderDetails"] *, [data-testid="stExpander"] details > div, [data-testid="stExpander"] details > div * { color:#1E2832!important; -webkit-text-fill-color:#1E2832!important; }
-/* NUCLEAR: hide ALL Material Symbol icon text */
-[style*="Material Symbols"], [style*="material-symbols"], .material-symbols-rounded, .material-symbols-outlined, .material-symbols, span[class*="Icon"], [data-testid="stExpanderToggleIcon"] { display:none!important; font-size:0!important; width:0!important; height:0!important; overflow:hidden!important; visibility:hidden!important; }
+.stApp [data-baseweb="select"] > div { background-color: #FFFFFF !important; color: #1A1D3A !important; border: 1px solid #DDD5EF !important; border-radius: 10px !important; }
+/* No text cursor on select triggers */
+[data-testid="stSelectbox"] [data-baseweb="select"] *, [data-testid="stMultiSelect"] [data-baseweb="select"] * { cursor:pointer!important; }
+[data-baseweb="select"] input[role="combobox"] { cursor:pointer!important; caret-color:transparent!important; }
+/* Dropdown option list */
+[data-baseweb="popover"], [data-baseweb="popover"] > div, [data-baseweb="menu"], [data-baseweb="list"] { background-color: #FFFFFF !important; color: #1A1D3A !important; border: 1px solid #DDD5EF !important; border-radius: 10px !important; }
+[data-baseweb="option"], [data-baseweb="menu"] li, [role="option"] { background-color: #FFFFFF !important; color: #1A1D3A !important; }
+/* Buttons: primary = blue, rest = white with blue border */
+[data-testid="stButton"] > button[kind="primary"], .stButton > button[kind="primary"], button[data-testid="baseButton-primary"] { background: linear-gradient(135deg, #1E3A6E 0%, #2E55A0 100%) !important; border: none !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }
+.stApp [data-testid="stButton"] > button[kind="primary"] *, .stApp .stButton > button[kind="primary"] *, .stApp button[data-testid="baseButton-primary"] * { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }
+[data-testid="stButton"] > button, .stButton > button { background: #FFFFFF !important; border: 1.5px solid #DDD5EF !important; color: #1E3A6E !important; }
+/* Download buttons: always light background */
+[data-testid="stDownloadButton"] > button,
+.stDownloadButton > button {
+  background: #FFFFFF !important;
+  border: 1.5px solid #DDD5EF !important;
+  color: #1E3A6E !important;
+  -webkit-text-fill-color: #1E3A6E !important;
+}
+[data-testid="stDownloadButton"] > button *,
+.stDownloadButton > button * {
+  color: #1E3A6E !important;
+  -webkit-text-fill-color: #1E3A6E !important;
+}
+/* Expander: dark text + hide icon + custom arrow */
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary * { color:#1A1D3A!important; -webkit-text-fill-color:#1A1D3A!important; background:#FFFFFF!important; font-weight:600!important; }
+[data-testid="stExpander"] summary [data-testid="stIconMaterial"], [data-testid="stExpander"] summary [data-testid="stExpanderToggleIcon"], [data-testid="stExpander"] summary span[class*="emntfgb"] { display:none!important; width:0!important; height:0!important; overflow:hidden!important; font-size:0!important; visibility:hidden!important; }
+[data-testid="stExpander"] summary { position:relative!important; padding-right:2.2rem!important; }
+[data-testid="stExpander"] summary::after { content:'›'; position:absolute; right:1rem; top:50%; transform:translateY(-50%) rotate(90deg); font-size:1.2rem; font-weight:700; color:#1E3A6E; transition:transform 0.2s ease; pointer-events:none; }
+[data-testid="stExpander"] details[open] summary::after { transform:translateY(-50%) rotate(270deg); }
+[data-testid="stExpander"] [data-testid="stExpanderDetails"], [data-testid="stExpander"] [data-testid="stExpanderDetails"] *, [data-testid="stExpander"] details > div, [data-testid="stExpander"] details > div * { color:#1A1D3A!important; -webkit-text-fill-color:#1A1D3A!important; }
+/* Hide Material Symbol icon text (font-load fallback only) */
+[style*="Material Symbols Rounded"], [style*="Material Symbols Outlined"], [style*="material-symbols-rounded"], [style*="material-symbols-outlined"], .material-symbols-rounded, .material-symbols-outlined, .material-symbols, [data-testid="stExpanderToggleIcon"] { display:none!important; font-size:0!important; width:0!important; height:0!important; overflow:hidden!important; visibility:hidden!important; }
 /* Hide Streamlit chrome */
 [data-testid="stHeader"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapse"], header[data-testid="stHeader"] { display: none !important; }
-/* Remove top gap */
+/* Remove top gap + constrain width */
 .stApp .block-container,
-.stApp [data-testid="stAppViewBlockContainer"] { padding-top: 0 !important; }
+.stApp [data-testid="stAppViewBlockContainer"] { padding-top:0!important; max-width:860px!important; margin-left:auto!important; margin-right:auto!important; padding-left:2rem!important; padding-right:2rem!important; }
+/* Hero logo text — always white regardless of theme cascade */
+.ts-hero h1, .stApp .ts-hero h1, div.ts-hero h1 { color:#FFFFFF!important; -webkit-text-fill-color:#FFFFFF!important; }
 </style>
 """
 

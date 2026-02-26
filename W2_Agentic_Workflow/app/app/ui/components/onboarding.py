@@ -1,10 +1,16 @@
-"""Onboarding: editorial-style trip intake with form and free-text."""
+"""Onboarding: single-input trip intake."""
 from __future__ import annotations
 
 import streamlit as st
 from datetime import date, timedelta
-from app.data.india_cities import INDIA_CITIES
 
+
+EXAMPLES = [
+    ("Solo Rishikesh ₹15K", "Plan a 4-day solo backpacking trip to Rishikesh under ₹15,000. Adventure and spiritual vibes. From Delhi."),
+    ("Family Goa ₹60K",     "5-day family vacation in Goa with 2 kids, budget ₹60,000. Beaches and water sports. From Mumbai."),
+    ("Weekend Jaipur",      "Weekend trip to Jaipur from Delhi. Midrange, culture and photography. 2 days."),
+    ("Luxury Kerala",       "Luxury 5-day Kerala trip. Backwaters and Munnar. Budget ₹1,00,000. Couple."),
+]
 
 INTEREST_OPTIONS = [
     ("adventure", "Adventure"),
@@ -21,83 +27,124 @@ INTEREST_OPTIONS = [
     ("wellness", "Wellness & Yoga"),
 ]
 
+VEHICLE_OPTIONS = [
+    ("any",         "No preference"),
+    ("flight",      "✈️  Flight"),
+    ("train",       "🚂  Train"),
+    ("bus",         "🚌  Bus"),
+    ("self_drive",  "🚗  Self-drive / Own car"),
+    ("cab",         "🚕  Cab / Taxi"),
+    ("bike",        "🏍️  Bike / Motorcycle"),
+    ("mixed",       "🔀  Mixed / Whatever's cheapest"),
+]
+
 
 def render_onboarding() -> str | None:
     """Render onboarding UI. Returns query string or None."""
-    popular_cities = sorted(INDIA_CITIES.keys())
-
-    # Apply quick-pick / example choices before widgets are created (Streamlit forbids
-    # writing to a widget key after that widget exists).
-    if "onb_dest_pick" in st.session_state:
-        st.session_state["onb_dest"] = st.session_state.pop("onb_dest_pick")
     if "onb_freetext_pick" in st.session_state:
         st.session_state["onb_freetext"] = st.session_state.pop("onb_freetext_pick")
 
     st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
 
-    col_form, col_free = st.columns([1.1, 0.9], gap="large")
+    # ── Primary: free-text input ──────────────────────────────────────
+    free_text = st.text_area(
+        "Describe your trip",
+        height=110,
+        placeholder="e.g.  4-day solo trip to Rishikesh, ₹15K budget, adventure & yoga vibes",
+        key="onb_freetext",
+        label_visibility="collapsed",
+    )
 
-    # ── Left: structured form ────────────────────────────────────────
-    with col_form:
-        st.markdown("### Where to next?")
-        st.caption("Fill in the details and we'll craft the perfect itinerary.")
+    # ── Example chips ─────────────────────────────────────────────────
+    chip_cols = st.columns(len(EXAMPLES))
+    for col, (label, prompt) in zip(chip_cols, EXAMPLES):
+        with col:
+            st.markdown('<div class="ts-dest-btn">', unsafe_allow_html=True)
+            if st.button(label, key=f"ex_{label}", use_container_width=True):
+                st.session_state["onb_freetext_pick"] = prompt
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        origin = st.text_input(
-            "Departing from",
-            value="Delhi",
-            placeholder="e.g. Delhi, Mumbai, Bangalore...",
-            key="onb_origin",
+    # ── Optional details expander ─────────────────────────────────────
+    with st.expander("Add trip details  ·  optional", expanded=False):
+
+        # Row 1: origin + dates
+        c1, c2, c3 = st.columns([1.2, 1, 1])
+        with c1:
+            st.text_input("Departing from", value="Delhi", key="onb_origin")
+        with c2:
+            st.date_input("Start date", value=date.today() + timedelta(days=7), key="onb_start")
+        with c3:
+            st.date_input("End date", value=date.today() + timedelta(days=10), key="onb_end")
+
+        # Row 2: budget — slider + text box with ₹ prefix
+        if "onb_budget" not in st.session_state:
+            st.session_state["onb_budget"] = 15000
+        if "onb_budget_text" not in st.session_state:
+            st.session_state["onb_budget_text"] = "₹15,000"
+
+        def _slider_changed():
+            v = st.session_state["onb_budget"]
+            st.session_state["onb_budget_text"] = f"₹{v:,}"
+
+        def _text_changed():
+            raw = st.session_state["onb_budget_text"].replace("₹", "").replace(",", "").strip()
+            try:
+                val = int(max(1, min(500000, int(float(raw)))))
+            except (ValueError, TypeError):
+                val = st.session_state["onb_budget"]
+            st.session_state["onb_budget"] = val
+            st.session_state["onb_budget_text"] = f"₹{val:,}"
+
+        st.markdown(
+            '<p style="margin:0 0 0.3rem 0; font-size:0.88rem; font-weight:500; '
+            'color:var(--ts-text-muted);">Budget</p>',
+            unsafe_allow_html=True,
         )
+        bs_col, bn_col = st.columns([4, 1])
+        with bs_col:
+            st.slider(
+                "Budget",
+                min_value=1,
+                max_value=500000,
+                step=500,
+                format="₹%d",
+                key="onb_budget",
+                label_visibility="collapsed",
+                on_change=_slider_changed,
+            )
+        with bn_col:
+            st.text_input(
+                "Budget text",
+                key="onb_budget_text",
+                label_visibility="collapsed",
+                on_change=_text_changed,
+            )
 
-        destination = st.text_input(
-            "Destination",
-            value="",
-            placeholder="Type any city — Goa, Manali, Kasol, Ooty...",
-            key="onb_dest",
-        )
-
-        st.caption("Quick picks")
-        pick_cols = st.columns(5)
-        for i, city in enumerate(popular_cities[:10]):
-            with pick_cols[i % 5]:
-                cont = st.container()
-                cont.markdown('<div class="ts-dest-btn">', unsafe_allow_html=True)
-                if cont.button(city, key=f"pick_{city}", use_container_width=True):
-                    st.session_state["onb_dest_pick"] = city
-                    st.rerun()
-                cont.markdown('</div>', unsafe_allow_html=True)
-
-        r1c1, r1c2 = st.columns(2)
-        with r1c1:
-            traveler_type = st.selectbox(
+        # Row 3: traveler type + travel style + vehicle
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            st.selectbox(
                 "Traveler type",
                 options=["Solo", "Couple", "Family", "Group"],
                 key="onb_traveler",
             )
-        with r1c2:
-            travel_style = st.selectbox(
+        with c5:
+            st.selectbox(
                 "Travel style",
                 options=["Backpacker", "Midrange", "Luxury"],
                 key="onb_style",
             )
+        with c6:
+            st.selectbox(
+                "Mode of travel",
+                options=[k for k, _ in VEHICLE_OPTIONS],
+                format_func=lambda k: dict(VEHICLE_OPTIONS).get(k, k),
+                key="onb_vehicle",
+            )
 
-        budget = st.slider(
-            "Budget (INR)",
-            min_value=5000,
-            max_value=500000,
-            step=1000,
-            value=15000,
-            format="₹%d",
-            key="onb_budget",
-        )
-
-        d1, d2 = st.columns(2)
-        with d1:
-            start_date = st.date_input("Start date", value=date.today() + timedelta(days=7), key="onb_start")
-        with d2:
-            end_date = st.date_input("End date", value=start_date + timedelta(days=2), key="onb_end")
-
-        interests = st.multiselect(
+        # Row 4: interests full width
+        st.multiselect(
             "Interests",
             options=[k for k, _ in INTEREST_OPTIONS],
             format_func=lambda k: dict(INTEREST_OPTIONS).get(k, k),
@@ -105,69 +152,52 @@ def render_onboarding() -> str | None:
             key="onb_interests",
         )
 
-    # ── Right: free-text & examples ──────────────────────────────────
-    with col_free:
-        st.markdown("### Or just tell us")
-        st.caption("Describe your dream trip in your own words — Hindi, English, Hinglish, anything goes.")
-
-        free_text = st.text_area(
-            "Describe your trip",
-            value="",
-            height=140,
-            placeholder="e.g. 4-day solo trip to Rishikesh, ₹15K budget, adventure & yoga vibes",
-            key="onb_freetext",
-            label_visibility="collapsed",
-        )
-
-        st.markdown("**Try these:**")
-        ex_cols = st.columns(2)
-        with ex_cols[0]:
-            if st.button("Solo Rishikesh ₹15K", key="ex1", use_container_width=True):
-                st.session_state["onb_freetext_pick"] = "Plan a 4-day solo backpacking trip to Rishikesh under ₹15,000. Adventure and spiritual. From Delhi."
-                st.rerun()
-            if st.button("Family Goa ₹60K", key="ex2", use_container_width=True):
-                st.session_state["onb_freetext_pick"] = "5-day family vacation in Goa with 2 kids. Budget ₹60,000. Beaches and water sports. From Mumbai."
-                st.rerun()
-        with ex_cols[1]:
-            if st.button("Weekend Jaipur", key="ex3", use_container_width=True):
-                st.session_state["onb_freetext_pick"] = "Weekend trip to Jaipur from Delhi. Midrange, culture and photography. 2 days."
-                st.rerun()
-            if st.button("Luxury Kerala", key="ex4", use_container_width=True):
-                st.session_state["onb_freetext_pick"] = "Luxury 5-day Kerala trip. Backwaters and Munnar. Budget ₹1,00,000."
-                st.rerun()
-
-        st.markdown("""
-        <div style="margin-top:1.5rem; padding:1rem 1.2rem; background:rgba(26,86,83,0.04);
-             border-radius:12px; border-left:4px solid #C5A55A;">
-          <p style="margin:0; font-size:0.88rem; color:#1E2832;">
-            <strong style="color:#1A5653;">TripSaathi works best when you share:</strong><br/>
-            destination, budget, dates, interests, and who you're traveling with.
-          </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ── Submit ───────────────────────────────────────────────────────
-    st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
+    # ── Submit ────────────────────────────────────────────────────────
+    st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
     if st.button("Plan My Journey", type="primary", use_container_width=True, key="onb_submit"):
         if free_text and free_text.strip():
-            return free_text.strip()
-        dest = (destination or "").strip()
-        if not dest:
-            st.error("Please enter a destination or describe your trip.")
-            return None
-        origin_city = (origin or "Delhi").strip()
-        style_lower = travel_style.lower()
-        days = max(1, (end_date - start_date).days + 1)
-        parts = [
-            f"{days}-day",
-            traveler_type.lower(),
-            f"trip to {dest}",
-            f"from {origin_city}",
-            f"budget ₹{budget:,}",
-            f"from {start_date} to {end_date}",
-            f"style {style_lower}",
-        ]
-        if interests:
-            parts.append("interests: " + ", ".join(interests))
-        return " ".join(parts)
+            extra = _build_extra_context()
+            return (free_text.strip() + ("  " + extra if extra else "")).strip()
+        st.error("Describe your trip above, or try one of the examples.")
+        return None
     return None
+
+
+def _build_extra_context() -> str:
+    """Assemble structured detail fields into a context string appended to free text."""
+    parts: list[str] = []
+
+    origin = (st.session_state.get("onb_origin") or "").strip()
+    if origin and origin.lower() != "delhi":
+        parts.append(f"from {origin}")
+
+    budget: int = st.session_state.get("onb_budget", 15000)
+    parts.append(f"budget ₹{budget:,}")
+
+    start = st.session_state.get("onb_start")
+    end   = st.session_state.get("onb_end")
+    if start and end:
+        days = max(1, (end - start).days + 1)
+        parts.append(f"{days} days from {start} to {end}")
+
+    traveler = st.session_state.get("onb_traveler", "Solo")
+    if traveler and traveler != "Solo":
+        parts.append(f"traveling as {traveler.lower()}")
+
+    style = st.session_state.get("onb_style", "Midrange")
+    if style:
+        parts.append(f"{style.lower()} style")
+
+    vehicle = st.session_state.get("onb_vehicle", "any")
+    if vehicle and vehicle != "any":
+        vehicle_label = dict(VEHICLE_OPTIONS).get(vehicle, vehicle)
+        # Strip emoji prefix for the query
+        vehicle_clean = vehicle_label.split("  ")[-1] if "  " in vehicle_label else vehicle_label
+        parts.append(f"preferred transport: {vehicle_clean}")
+
+    interests: list[str] = st.session_state.get("onb_interests", [])
+    if interests:
+        interest_labels = [dict(INTEREST_OPTIONS).get(k, k) for k in interests]
+        parts.append("interests: " + ", ".join(interest_labels))
+
+    return ". ".join(parts)

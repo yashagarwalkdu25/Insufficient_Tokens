@@ -132,12 +132,17 @@ def get_weather_summary(
     """Return a human-readable weather summary for the trip date range."""
     fc = get_forecast(latitude, longitude, days=16)
 
+    from datetime import date as _date
     parts = []
     for date_key in sorted(fc.keys()):
         if start_date <= date_key <= end_date:
             w = fc[date_key]
+            try:
+                label = _date.fromisoformat(date_key).strftime("%-d %b")
+            except ValueError:
+                label = date_key
             parts.append(
-                f"{date_key}: {w.get('temp_min', '?')}-{w.get('temp_max', '?')}C, "
+                f"{label}: {w.get('temp_min', '?')}-{w.get('temp_max', '?')}°C, "
                 f"{w.get('condition', '')}, rain {w.get('rain_probability', 0)}%"
             )
 

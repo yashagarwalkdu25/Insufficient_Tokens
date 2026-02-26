@@ -72,12 +72,17 @@ class WeatherClient:
     ) -> str:
         """Human-readable weather summary for the date range."""
         f = self.get_forecast(latitude, longitude, days=10)
+        from datetime import date as _date
         parts = []
         for date_key in sorted(f.keys()):
             if start_date <= date_key <= end_date:
                 w = f[date_key]
+                try:
+                    label = _date.fromisoformat(date_key).strftime("%-d %b")
+                except ValueError:
+                    label = date_key
                 parts.append(
-                    f"{date_key}: {w.get('temp_min', '?')}-{w.get('temp_max', '?')}°C, "
+                    f"{label}: {w.get('temp_min', '?')}-{w.get('temp_max', '?')}°C, "
                     f"{w.get('condition', '')}, rain {w.get('rain_probability', 0)}%"
                 )
         return " | ".join(parts) if parts else "No forecast available."

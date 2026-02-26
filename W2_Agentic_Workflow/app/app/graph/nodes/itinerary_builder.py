@@ -20,10 +20,61 @@ import time
 from datetime import date, timedelta
 from typing import Any, Optional
 
+import httpx
+
 from app.config import get_settings
+from app.data.india_cities import get_city
 from app.models.trip import Trip, DayPlan, ItineraryItem
 
 logger = logging.getLogger(__name__)
+
+
+def _nominatim_geocode(place: str, city: str) -> tuple[float, float] | None:
+    """Try to geocode a specific place name via Nominatim. Returns (lat, lon) or None."""
+    for query in (f"{place}, {city}, India", f"{place}, India"):
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": query, "format": "json", "limit": 1},
+                    headers={"User-Agent": "TripSaathi/1.0"},
+                )
+                resp.raise_for_status()
+                results = resp.json()
+            if results:
+                return float(results[0]["lat"]), float(results[0]["lon"])
+        except Exception:
+            pass
+    return None
+
+
+def _fill_missing_coords(days: list[DayPlan], dest: str) -> None:
+    """Geocode items that have no coordinates. Uses Nominatim for specific places,
+    falls back to city base coords with small per-item offsets so markers don't stack."""
+    city_data = get_city(dest)
+    base_lat = float(city_data["latitude"]) if city_data and city_data.get("latitude") else None
+    base_lon = float(city_data["longitude"]) if city_data and city_data.get("longitude") else None
+
+    offset_step = 0.003
+    offset_idx = 0
+
+    for day in days:
+        for item in day.items:
+            if item.latitude is not None and item.longitude is not None:
+                continue
+            # Skip transport/hotel items — they rarely have specific geocodable names
+            if item.item_type in ("transport",):
+                continue
+            # Try Nominatim for the specific place
+            coords = _nominatim_geocode(item.title, dest)
+            if coords:
+                item.latitude, item.longitude = coords
+                logger.debug("Geocoded '%s' -> %s", item.title, coords)
+            elif base_lat is not None and base_lon is not None:
+                # Spread items around city center so they're individually visible
+                item.latitude = base_lat + (offset_idx % 7 - 3) * offset_step
+                item.longitude = base_lon + (offset_idx // 7 % 7 - 3) * offset_step
+                offset_idx += 1
 
 
 def _build_activity_lines(selected_activities: list) -> list[str]:
@@ -251,6 +302,8 @@ Be specific, use real place names, and make this a trip that a real traveler wou
             model=settings.GPT4O_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
+            max_tokens=4000,
+            timeout=90,
         )
         content = (r.choices[0].message.content or "").strip()
         parsed = _extract_json_lenient(content)
@@ -379,6 +432,9 @@ def build_itinerary_node(state: dict[str, Any]) -> dict[str, Any]:
             f"Post-validation: {verified_count} items verified against real data, "
             f"{unverified_count} items unverified (LLM-generated)."
         )
+
+    # Fill coordinates for items that have none (Nominatim → city-center fallback)
+    _fill_missing_coords(days, dest)
 
     total_cost = sum(dp.day_cost for dp in days)
     trip = Trip(

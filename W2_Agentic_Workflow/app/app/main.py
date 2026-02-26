@@ -232,42 +232,38 @@ else:
 # Input/button overrides injected last so they win over Streamlit theme
 st.markdown(load_late_overrides(), unsafe_allow_html=True)
 
-# JS: hide Material Symbol icon elements that render as text
+# JS: hide Material Symbol icon elements that render as raw text ligatures.
+# Target [data-testid="stIconMaterial"] directly — never hide parent wrappers.
 import streamlit.components.v1 as _stc
 _stc.html("""<script>
 (function(){
   function hideIcons(){
     try {
       var doc = window.parent.document;
-      doc.querySelectorAll('[data-testid="stExpander"] summary').forEach(function(s){
-        var first = s.querySelector(':scope > span:first-child');
-        if(first){
-          var txt = first.textContent || '';
-          if(txt.indexOf('keyboard') !== -1 || txt.indexOf('expand') !== -1
-             || txt.indexOf('chevron') !== -1 || txt.indexOf('arrow') !== -1){
-            first.style.setProperty('display','none','important');
-          }
-        }
+      // Shrink icon elements to zero — avoids Streamlit toggling display back
+      doc.querySelectorAll('[data-testid="stIconMaterial"]').forEach(function(el){
+        el.style.setProperty('font-size','0','important');
+        el.style.setProperty('width','0','important');
+        el.style.setProperty('height','0','important');
+        el.style.setProperty('overflow','hidden','important');
+        el.style.setProperty('visibility','hidden','important');
+        el.style.setProperty('position','absolute','important');
       });
-      doc.querySelectorAll(
-        '[data-testid="stSidebar"] span, [data-testid="stHeader"] span, [data-testid="collapsedControl"] span'
-      ).forEach(function(el){
-        var t = (el.textContent||'').trim();
-        if(t.indexOf('keyboard')!==-1 || t.indexOf('chevron')!==-1
-           || t.indexOf('arrow_')!==-1 || t==='close' || t==='menu'){
-          el.style.setProperty('display','none','important');
-        }
+      // Ensure the summary wrapper span is always visible
+      doc.querySelectorAll('[data-testid="stExpander"] summary > span').forEach(function(span){
+        span.style.removeProperty('display');
+        span.style.setProperty('display','inline-flex','important');
       });
     } catch(e){}
   }
   hideIcons();
-  setTimeout(hideIcons, 200);
-  setTimeout(hideIcons, 600);
-  setTimeout(hideIcons, 1200);
+  setTimeout(hideIcons, 100);
+  setTimeout(hideIcons, 400);
+  setTimeout(hideIcons, 1000);
   try {
     var obs = new MutationObserver(function(){ hideIcons(); });
     obs.observe(window.parent.document.body, {childList:true, subtree:true});
-    setTimeout(function(){ obs.disconnect(); }, 10000);
+    setTimeout(function(){ obs.disconnect(); }, 15000);
   } catch(e){}
 })();
 </script>""", height=0)

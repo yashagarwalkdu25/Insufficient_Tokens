@@ -67,6 +67,8 @@ def _llm_recommend(req: dict[str, Any]) -> list[dict[str, Any]]:
             },
         ],
         temperature=0.9,
+        max_tokens=500,
+        timeout=20,
     )
 
     content = (r.choices[0].message.content or "").strip()

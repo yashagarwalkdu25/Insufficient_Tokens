@@ -81,6 +81,9 @@ def render_itinerary(trip: dict[str, Any], state: dict[str, Any]) -> None:
                 cost = item.get("cost", 0)
                 desc = item.get("description", "")
 
+                cost_html = (
+                    f'<span class="ts-itin-cost">₹{cost:,.0f}</span>' if cost else ''
+                )
                 st.markdown(
                     f'<div class="ts-itin-item">'
                     f'  <div class="ts-itin-icon {icon_cls}">{emoji}</div>'
@@ -89,8 +92,8 @@ def render_itinerary(trip: dict[str, Any], state: dict[str, Any]) -> None:
                     f'    <span class="ts-itin-title">{title}</span>'
                     + (f'<br/><span style="font-size:0.82rem; color:var(--ts-text-muted);">{desc[:150]}</span>' if desc else '')
                     + f'  </div>'
-                    f'  <span class="ts-itin-cost">₹{cost:,.0f}</span>'
-                    f'</div>',
+                    + cost_html
+                    + f'</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -107,7 +110,7 @@ def render_itinerary(trip: dict[str, Any], state: dict[str, Any]) -> None:
 
                 dur = item.get("travel_duration_to_next")
                 mode = item.get("travel_mode_to_next") or "drive"
-                if dur is not None and idx < len(items) - 1:
+                if dur is not None and dur > 0 and idx < len(items) - 1:
                     mode_icon = {"driving": "🚗", "walking": "🚶", "transit": "🚌"}.get(mode, "🚗")
                     st.markdown(
                         f'<div class="ts-travel-badge">{mode_icon} {dur} min to next stop</div>',

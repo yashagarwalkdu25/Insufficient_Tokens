@@ -45,7 +45,19 @@ def _preview_text(node_name: str, partial_state: dict[str, Any]) -> str:
         return f"{len(partial_state.get('activity_options') or [])} experiences"
     if node_name == "weather_check":
         w = partial_state.get("weather") or {}
-        return (w.get("summary", "Forecast ready")[:80] if isinstance(w, dict) else "Done")
+        if isinstance(w, dict):
+            summary = w.get("summary", "")
+            if summary:
+                # Count days in summary (pipe-separated entries)
+                n_days = len([p for p in summary.split("|") if p.strip()])
+                # Show first entry only as a teaser
+                first = summary.split("|")[0].strip()
+                # Trim to ~40 chars
+                if len(first) > 42:
+                    first = first[:40] + "…"
+                return f"{first}" + (f" +{n_days-1} more" if n_days > 1 else "")
+            return "Forecast ready"
+        return "Done"
     if node_name == "local_intel":
         t = len(partial_state.get("local_tips") or [])
         g = len(partial_state.get("hidden_gems") or [])

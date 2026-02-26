@@ -21,11 +21,17 @@ def render_share_modal(state: dict[str, Any], base_url: str = "http://localhost:
         st.session_state["shared_trip_id"] = trip_id
     share_url = f"{base_url}/?id={trip_id}"
 
-    st.markdown('<div class="ts-share-card">', unsafe_allow_html=True)
-    st.markdown("### Share your journey")
-    st.caption("Send this link to anyone — they'll see your full itinerary.")
+    # Card header — rendered as a single HTML block (Streamlit can't wrap widgets in divs)
+    st.markdown(
+        '<div class="ts-share-card">'
+        '<h3 style="margin:0 0 0.3rem 0;">Share your journey</h3>'
+        '<p style="margin:0 0 0.8rem 0; color:var(--ts-text-muted); font-size:0.9rem;">'
+        "Send this link to anyone — they'll see your full itinerary.</p>"
+        f'<div class="ts-share-url">{share_url}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-    st.code(share_url, language=None)
     if st.button("Copy link", key="copy_link_btn"):
         st.success("Copy the link above (Ctrl+C / Cmd+C)")
 
@@ -38,42 +44,22 @@ def render_share_modal(state: dict[str, Any], base_url: str = "http://localhost:
 
     st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
     st.markdown("#### Download")
-    col1, col2 = st.columns(2)
-    with col1:
-        try:
-            from app.export.pdf_generator import PDFGenerator
-            gen = PDFGenerator()
-            pdf_bytes = gen.generate_pdf(
-                state.get("trip") or {},
-                state,
-                state.get("vibe_score") or {},
-                state.get("budget_tracker") or {},
-            )
-            st.download_button(
-                "Download PDF",
-                data=pdf_bytes,
-                file_name="tripsaathi_itinerary.pdf",
-                mime="application/pdf",
-                key="dl_pdf",
-                use_container_width=True,
-            )
-        except Exception as e:
-            st.caption(f"PDF: {str(e)[:50]}")
-    with col2:
-        try:
-            html_str = export_to_html(
-                state.get("trip") or {},
-                state,
-                state.get("vibe_score") or {},
-            )
-            st.download_button(
-                "Download HTML",
-                data=html_str,
-                file_name="tripsaathi_trip.html",
-                mime="text/html",
-                key="dl_html",
-                use_container_width=True,
-            )
-        except Exception as e:
-            st.caption(f"HTML: {str(e)[:50]}")
-    st.markdown('</div>', unsafe_allow_html=True)
+    try:
+        from app.export.pdf_generator import PDFGenerator
+        gen = PDFGenerator()
+        pdf_bytes = gen.generate_pdf(
+            state.get("trip") or {},
+            state,
+            state.get("vibe_score") or {},
+            state.get("budget_tracker") or {},
+        )
+        st.download_button(
+            "Download PDF",
+            data=pdf_bytes,
+            file_name="tripsaathi_itinerary.pdf",
+            mime="application/pdf",
+            key="dl_pdf",
+            use_container_width=True,
+        )
+    except Exception as e:
+        st.caption(f"PDF: {str(e)[:50]}")

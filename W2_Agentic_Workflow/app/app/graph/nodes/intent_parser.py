@@ -169,6 +169,8 @@ IMPORTANT:
 - Do NOT leave destination empty if the user clearly named a city/town — even if it's a small or uncommon place."""},
                     {"role": "user", "content": raw},
                 ],
+                max_tokens=400,
+                timeout=20,
             )
             content = (r.choices[0].message.content or "").strip()
             if content:

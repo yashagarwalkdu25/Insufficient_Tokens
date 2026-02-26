@@ -82,6 +82,8 @@ Rules:
             model=settings.GPT4O_MINI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
+            max_tokens=400,
+            timeout=20,
         )
         content = (r.choices[0].message.content or "").strip()
         if "```" in content:
