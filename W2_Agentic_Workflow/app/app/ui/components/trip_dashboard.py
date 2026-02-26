@@ -16,7 +16,7 @@ def render_trip_dashboard(state: dict[str, Any]) -> None:
     tagline = vibe_score.get("tagline", "")
     n_days = len(trip.get("days") or [])
 
-    # ── Top summary bar ──────────────────────────────────────────────
+    # Top summary bar
     st.markdown(f"""
     <div class="ts-card" style="display:flex; flex-wrap:wrap; align-items:center; gap:1.5rem; padding:1.3rem 1.6rem;">
       <div style="flex:1; min-width:200px;">
@@ -39,7 +39,7 @@ def render_trip_dashboard(state: dict[str, Any]) -> None:
     if tagline:
         st.caption(f"_{tagline}_")
 
-    # ── Share button ─────────────────────────────────────────────────
+    # Share button
     share_col, _, _ = st.columns([1, 3, 1])
     with share_col:
         if st.button("Share trip", key="dashboard_share_btn", use_container_width=True):
@@ -47,7 +47,7 @@ def render_trip_dashboard(state: dict[str, Any]) -> None:
 
     st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
 
-    # ── Tabs ─────────────────────────────────────────────────────────
+    # Tabs
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Itinerary",
         "Map",
@@ -79,7 +79,7 @@ def render_trip_dashboard(state: dict[str, Any]) -> None:
         from app.ui.components.reasoning_view import render_reasoning
         render_reasoning(state.get("agent_decisions") or [])
 
-    # ── Action bar ───────────────────────────────────────────────────
+    # Action bar
     st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -87,11 +87,21 @@ def render_trip_dashboard(state: dict[str, Any]) -> None:
             st.session_state["show_approval"] = True
             st.rerun()
     with c2:
-        if st.button("Modify Trip", use_container_width=True, key="act_modify"):
-            st.session_state["current_screen"] = "modify_chat"
+        is_modify_active = st.session_state.get("show_modify_sidebar", False)
+        modify_label = "Close Chat" if is_modify_active else "Modify Trip"
+        if st.button(modify_label, use_container_width=True, key="act_modify"):
+            if is_modify_active:
+                st.session_state["show_modify_sidebar"] = False
+                st.session_state["modify_chat_active"] = False
+            else:
+                st.session_state["show_modify_sidebar"] = True
+                st.session_state["modify_chat_active"] = True
             st.rerun()
     with c3:
         if st.button("New Journey", use_container_width=True, key="act_new"):
             st.session_state["trip_state"] = {}
             st.session_state["current_screen"] = "onboarding"
+            st.session_state["chat_messages"] = []
+            st.session_state["show_modify_sidebar"] = False
+            st.session_state["modify_chat_active"] = False
             st.rerun()

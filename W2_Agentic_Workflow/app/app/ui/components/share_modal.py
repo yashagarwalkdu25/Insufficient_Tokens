@@ -1,4 +1,4 @@
-"""Share modal: PDF/HTML download, QR code, shareable link."""
+"""Share modal: PDF/HTML/PPT download, QR code, shareable link."""
 from __future__ import annotations
 
 import streamlit as st

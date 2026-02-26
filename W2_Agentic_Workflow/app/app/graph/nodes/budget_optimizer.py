@@ -3,7 +3,7 @@ Budget optimizer agent: LLM-powered trade-off analysis.
 
 Uses GPT-4o-mini to reason about budget allocation, compare flight vs ground transport,
 score options by value, and select the best combination within budget.
-Falls back to heuristic scoring when no API key.
+Requires OpenAI API key — no heuristic fallback.
 """
 from __future__ import annotations
 
@@ -18,27 +18,6 @@ from app.models.budget import BudgetTracker, BudgetCategory
 logger = logging.getLogger(__name__)
 
 
-def _score_option(option: dict, category: str, style: str, budget_total: float) -> float:
-    """Heuristic score (0-100) for a transport/hotel/activity option."""
-    price = float(option.get("total_price") or option.get("price") or option.get("price_per_night") or 0)
-    rating = float(option.get("star_rating") or option.get("rating") or 3.0)
-
-    # Price score: cheaper = higher score (relative to budget)
-    budget_fraction = price / budget_total if budget_total > 0 else 1.0
-    price_score = max(0, 100 - budget_fraction * 200)
-
-    # Quality score from rating
-    quality_score = (rating / 5.0) * 100
-
-    # Style weights
-    if style in ("backpacker", "budget"):
-        return price_score * 0.6 + quality_score * 0.4
-    elif style == "luxury":
-        return price_score * 0.2 + quality_score * 0.8
-    else:
-        return price_score * 0.45 + quality_score * 0.55
-
-
 def _llm_optimize(req: dict, flights: list, ground: list, hotels: list, activities: list, budget_total: float) -> dict | None:
     """Use GPT-4o-mini to reason about the best budget allocation and selections."""
     settings = get_settings()
@@ -49,7 +28,6 @@ def _llm_optimize(req: dict, flights: list, ground: list, hotels: list, activiti
         from openai import OpenAI
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-        # Summarize options compactly
         flight_summary = []
         for i, f in enumerate(flights[:5]):
             ob = f.get("outbound") or {}
@@ -115,7 +93,7 @@ Rules:
 
 
 def optimize_budget_node(state: dict[str, Any]) -> dict[str, Any]:
-    """LangGraph node: LLM-powered budget optimization with heuristic fallback."""
+    """LangGraph node: LLM-powered budget optimization."""
     start_t = time.time()
     req = state.get("trip_request") or {}
     budget_total = float(req.get("budget") or 15000)
@@ -128,7 +106,6 @@ def optimize_budget_node(state: dict[str, Any]) -> dict[str, Any]:
     reasoning_parts: list[str] = []
     tokens_used = 0
 
-    # ── Try LLM optimization ──────────────────────────────────────────────
     llm_result = _llm_optimize(req, flights, ground, hotels, activities, budget_total)
 
     selected_flight = None
@@ -148,7 +125,6 @@ def optimize_budget_node(state: dict[str, Any]) -> dict[str, Any]:
         }
         warnings = llm_result.get("warnings") or []
 
-        # Select flight or ground transport based on LLM
         prefer_ground = llm_result.get("prefer_ground_over_flight", False)
         if prefer_ground and ground:
             gi = llm_result.get("selected_ground_index") or 0
@@ -161,54 +137,37 @@ def optimize_budget_node(state: dict[str, Any]) -> dict[str, Any]:
             selected_flight = f if isinstance(f, dict) else (f.model_dump() if hasattr(f, "model_dump") else None)
             reasoning_parts.append(f"LLM chose flight option (index {fi}).")
 
-        # Hotel
         if hotels:
             hi = llm_result.get("selected_hotel_index") or 0
             h = hotels[min(hi, len(hotels) - 1)]
             selected_hotel = h if isinstance(h, dict) else (h.model_dump() if hasattr(h, "model_dump") else None)
             reasoning_parts.append(f"LLM chose hotel (index {hi}): {selected_hotel.get('name', '?') if selected_hotel else '?'}.")
 
-        # Activities
         act_indices = llm_result.get("selected_activity_indices") or list(range(min(5, len(activities))))
         for ai in act_indices:
             if 0 <= ai < len(activities):
                 a = activities[ai]
                 selected_activities.append(a if isinstance(a, dict) else (a.model_dump() if hasattr(a, "model_dump") else a))
     else:
-        # ── Heuristic fallback ─────────────────────────────────────────────
-        reasoning_parts.append("Using heuristic scoring (no LLM available).")
-
-        # Score and sort flights
+        reasoning_parts.append("LLM budget optimization unavailable. OpenAI API key may be missing or call errored. Using first available options.")
         if flights:
-            scored = [(f, _score_option(f, "transport", style, budget_total)) for f in flights if isinstance(f, dict)]
-            scored.sort(key=lambda x: x[1], reverse=True)
-            if scored:
-                selected_flight = scored[0][0]
-
-        # Score and sort hotels
+            selected_flight = flights[0] if isinstance(flights[0], dict) else (flights[0].model_dump() if hasattr(flights[0], "model_dump") else None)
         if hotels:
-            scored = [(h, _score_option(h, "hotel", style, budget_total)) for h in hotels if isinstance(h, dict)]
-            scored.sort(key=lambda x: x[1], reverse=True)
-            if scored:
-                selected_hotel = scored[0][0]
+            selected_hotel = hotels[0] if isinstance(hotels[0], dict) else (hotels[0].model_dump() if hasattr(hotels[0], "model_dump") else None)
+        selected_activities = [a if isinstance(a, dict) else (a.model_dump() if hasattr(a, "model_dump") else a) for a in activities[:5]]
 
-        # Select activities within budget
-        act_budget = budget_total * 0.2
-        spent_act = 0
-        for a in activities[:8]:
-            price = (a.get("price") or 0) if isinstance(a, dict) else getattr(a, "price", 0)
-            if spent_act + price <= act_budget:
-                selected_activities.append(a if isinstance(a, dict) else (a.model_dump() if hasattr(a, "model_dump") else a))
-                spent_act += price
-
-    # ── Build BudgetTracker ────────────────────────────────────────────────
-    transport_cost = (selected_flight.get("total_price") or selected_flight.get("price") or 500) if selected_flight else 500
-    accom_cost = (selected_hotel.get("total_price") or selected_hotel.get("price_per_night", 0) * 3) if selected_hotel else 2000
+    # Build BudgetTracker
+    transport_cost = 0
+    if selected_flight:
+        transport_cost = float(selected_flight.get("total_price") or selected_flight.get("price") or 0)
+    accom_cost = 0
+    if selected_hotel:
+        accom_cost = float(selected_hotel.get("total_price") or selected_hotel.get("price_per_night", 0) * 3)
     act_cost = sum((a.get("price") or 0) if isinstance(a, dict) else 0 for a in selected_activities)
 
     categories = [
-        BudgetCategory(category="transport", allocated=budget_total * budget_alloc["transport"], spent=float(transport_cost), remaining=budget_total * budget_alloc["transport"] - float(transport_cost)),
-        BudgetCategory(category="accommodation", allocated=budget_total * budget_alloc["accommodation"], spent=float(accom_cost), remaining=budget_total * budget_alloc["accommodation"] - float(accom_cost)),
+        BudgetCategory(category="transport", allocated=budget_total * budget_alloc["transport"], spent=transport_cost, remaining=budget_total * budget_alloc["transport"] - transport_cost),
+        BudgetCategory(category="accommodation", allocated=budget_total * budget_alloc["accommodation"], spent=accom_cost, remaining=budget_total * budget_alloc["accommodation"] - accom_cost),
         BudgetCategory(category="activities", allocated=budget_total * budget_alloc["activities"], spent=float(act_cost), remaining=budget_total * budget_alloc["activities"] - float(act_cost)),
         BudgetCategory(category="meals", allocated=budget_total * budget_alloc["meals"], spent=0, remaining=budget_total * budget_alloc["meals"]),
         BudgetCategory(category="misc", allocated=budget_total * budget_alloc["misc"], spent=0, remaining=budget_total * budget_alloc["misc"]),

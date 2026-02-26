@@ -36,7 +36,7 @@ class FlightOption(BaseModel):
     total_price: float = Field(..., ge=0)
     currency: str = Field(default="INR")
     booking_url: Optional[str] = Field(default=None)
-    source: Literal["api", "curated", "llm"] = Field(..., description="Data source")
+    source: Literal["api", "curated", "llm", "tavily_web"] = Field(..., description="Data source")
     verified: bool = Field(default=False, description="Verified against real data")
 
     model_config = {"populate_by_name": True}
@@ -53,5 +53,5 @@ class GroundTransportOption(BaseModel):
     price: float = Field(..., ge=0)
     currency: str = Field(default="INR")
     booking_url: Optional[str] = Field(default=None)
-    source: Literal["api", "curated", "llm"] = Field(...)
+    source: Literal["api", "curated", "llm", "tavily_web"] = Field(...)
     verified: bool = Field(default=False)

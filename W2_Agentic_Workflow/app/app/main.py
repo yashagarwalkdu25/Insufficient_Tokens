@@ -25,7 +25,7 @@ from app.ui.styles import load_css, load_late_overrides
 st.set_page_config(page_title="TripSaathi", page_icon="🌿", layout="wide", initial_sidebar_state="collapsed")
 st.markdown(load_css(), unsafe_allow_html=True)
 
-# ── Force sidebar open via CSS when Modify Trip is active ─────────────
+# Force sidebar open via CSS when Modify Trip chat is active
 if st.session_state.get("show_modify_sidebar"):
     st.markdown("""<style>
     .stApp [data-testid="stSidebar"] {
@@ -70,11 +70,11 @@ if "id" in st.query_params:
         st.session_state["current_screen"] = "dashboard"
         st.session_state["read_only_shared"] = True
 
-# ── Sidebar ──────────────────────────────────────────────────────────
+# Sidebar chat
 from app.ui.components.chat_sidebar import render_chat_sidebar
 render_chat_sidebar()
 
-# ── Hero header (only on onboarding / planning, hidden on dashboard) ─
+# Hero header (only on onboarding / planning, hidden on dashboard)
 if st.session_state.get("current_screen") in ("onboarding", "planning", None):
     st.markdown("""
     <div class="ts-hero">
@@ -85,7 +85,7 @@ if st.session_state.get("current_screen") in ("onboarding", "planning", None):
     </div>
     """, unsafe_allow_html=True)
 
-# ── Screen router ────────────────────────────────────────────────────
+# Screen router
 if st.session_state["current_screen"] == "onboarding":
     logger.info("Screen: onboarding")
     from app.ui.components.onboarding import render_onboarding
@@ -104,12 +104,11 @@ elif st.session_state["current_screen"] == "planning":
     from app.ui.components.planning_progress import render_planning_progress
     query = st.session_state.get("plan_query")
     resume_feedback = st.session_state.get("planning_resume_feedback")
-    
-    # Check if resuming after destination approval
+
     trip_state = st.session_state.get("trip_state") or {}
     if not query and not resume_feedback and trip_state.get("trip_request"):
-        # Resuming after destination approval - use runner.resume with approval=True
         logger.info("Resuming after destination approval")
+        memory.save_state(session_id, trip_state)
         runner = GraphRunner()
         out = runner.resume(session_id, user_feedback=None, approval=True)
         st.session_state["trip_state"] = out
@@ -126,6 +125,15 @@ elif st.session_state["current_screen"] == "planning":
         runner = GraphRunner()
         out = runner.resume(session_id, user_feedback=resume_feedback, approval=True)
         st.session_state["trip_state"] = out
+
+        # Store assistant response in chat messages
+        conv_response = out.get("conversation_response")
+        if conv_response:
+            msgs = st.session_state.get("chat_messages") or []
+            if not any(m.get("content") == conv_response for m in msgs):
+                msgs.append({"role": "assistant", "content": conv_response})
+                st.session_state["chat_messages"] = msgs
+
         st.session_state["current_screen"] = "dashboard"
         st.session_state["planning_resume_feedback"] = None
         st.rerun()
@@ -138,8 +146,7 @@ elif st.session_state["current_screen"] == "planning":
             if loaded:
                 st.session_state["trip_state"] = loaded
             trip_state = st.session_state.get("trip_state") or {}
-            
-            # Check if requires approval (destination or itinerary)
+
             if trip_state.get("requires_approval"):
                 approval_type = trip_state.get("approval_type", "")
                 logger.info("Planning done → approval required | type=%s", approval_type)
@@ -176,24 +183,23 @@ elif st.session_state.get("show_approval"):
     def on_approve():
         approval_type = state.get("approval_type", "")
         if approval_type == "destination":
-            # Destination approved - resume planning with full pipeline
             logger.info("Action: approve destination → resume planning")
             st.session_state["show_approval"] = False
             st.session_state["current_screen"] = "planning"
-            st.session_state["plan_query"] = None  # Will use existing trip_request from state
+            st.session_state["plan_query"] = None
             st.session_state["planning_resume_feedback"] = None
             st.rerun()
         else:
-            # Itinerary approved - show share modal
             logger.info("Action: approve itinerary → share_modal")
             st.session_state["show_approval"] = False
             st.session_state["show_share_modal"] = True
             st.rerun()
 
     def on_modify():
-        logger.info("Action: modify → modify_chat (sidebar)")
+        logger.info("Action: modify → opening chat sidebar")
         st.session_state["show_approval"] = False
         st.session_state["show_modify_sidebar"] = True
+        st.session_state["modify_chat_active"] = True
         st.session_state["current_screen"] = "dashboard"
         st.rerun()
 
@@ -202,6 +208,7 @@ elif st.session_state.get("show_approval"):
         st.session_state["show_approval"] = False
         st.session_state["trip_state"] = {}
         st.session_state["current_screen"] = "onboarding"
+        st.session_state["chat_messages"] = []
         st.rerun()
 
     render_approval(state, on_approve, on_modify, on_reset)
@@ -211,12 +218,6 @@ else:
     trip = state.get("trip")
     if trip:
         logger.info("Screen: dashboard | destination=%s", trip.get("destination", "?"))
-        # When user clicked "Modify Trip", activate sidebar via CSS flag
-        if st.session_state.get("current_screen") == "modify_chat":
-            logger.info("Action: Modify Trip → opening sidebar via CSS")
-            st.session_state["show_modify_sidebar"] = True
-            st.session_state["current_screen"] = "dashboard"
-            st.rerun()
         from app.ui.components.trip_dashboard import render_trip_dashboard
         render_trip_dashboard(state)
     else:
@@ -231,18 +232,16 @@ else:
 # Input/button overrides injected last so they win over Streamlit theme
 st.markdown(load_late_overrides(), unsafe_allow_html=True)
 
-# ── JS: hide Material Symbol icon elements that render as text ────────
+# JS: hide Material Symbol icon elements that render as text
 import streamlit.components.v1 as _stc
 _stc.html("""<script>
 (function(){
   function hideIcons(){
     try {
       var doc = window.parent.document;
-      // Hide first span child of every expander summary (the icon span)
       doc.querySelectorAll('[data-testid="stExpander"] summary').forEach(function(s){
         var first = s.querySelector(':scope > span:first-child');
         if(first){
-          // Check if this span contains icon text (starts with "keyboard" or similar)
           var txt = first.textContent || '';
           if(txt.indexOf('keyboard') !== -1 || txt.indexOf('expand') !== -1
              || txt.indexOf('chevron') !== -1 || txt.indexOf('arrow') !== -1){
@@ -250,7 +249,6 @@ _stc.html("""<script>
           }
         }
       });
-      // Also hide icon text in sidebar and header area
       doc.querySelectorAll(
         '[data-testid="stSidebar"] span, [data-testid="stHeader"] span, [data-testid="collapsedControl"] span'
       ).forEach(function(el){

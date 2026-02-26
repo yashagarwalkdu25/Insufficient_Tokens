@@ -418,15 +418,6 @@ def get_all_ground_transport(
     except Exception:
         real_trains = []
 
-    # ── Fallback: generic train fares if no real trains found ────────────
-    if not any(o.get("transport_type") == "train" for o in options):
-        train_fares = get_all_train_fares(distance_km)
-        for t in train_fares:
-            t["booking_url"] = irctc_url
-            t["departure_time"] = date_str
-            t["arrival_time"] = date_str
-            options.append(t)
-
     # ── Buses ────────────────────────────────────────────────────────────
     bus_fares = get_all_bus_fares(distance_km)
     for b in bus_fares:

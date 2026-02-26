@@ -1,5 +1,7 @@
 """Intent parser: extract TripRequest from raw_query (GPT or heuristic)."""
 import json
+import logging
+import re
 import time
 from datetime import date, timedelta
 from typing import Any
@@ -7,98 +9,110 @@ from typing import Any
 from dateutil.parser import parse as date_parse
 
 from app.config import get_settings
-from app.data.india_cities import search_cities
+from app.data.india_cities import search_cities, INDIA_CITIES
 from app.models.user import TripRequest
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_destination_heuristic(raw: str) -> tuple[str, str]:
+    """Extract destination and origin from raw text using pattern matching.
+
+    Returns (destination, origin). Either may be empty.
+    """
+    raw_lower = raw.lower()
+
+    dest = ""
+    origin = ""
+
+    to_pattern = re.search(r'\bto\s+([A-Za-z][A-Za-z\s]{1,30}?)(?:\s*[,.]|\s+(?:from|for|under|budget|with|in|on|\d)|\s*$)', raw, re.IGNORECASE)
+    if to_pattern:
+        dest = to_pattern.group(1).strip().title()
+
+    from_pattern = re.search(r'\bfrom\s+([A-Za-z][A-Za-z\s]{1,30}?)(?:\s*[,.]|\s+(?:to|for|under|budget|with|in|on|\d)|\s*$)', raw, re.IGNORECASE)
+    if from_pattern:
+        origin = from_pattern.group(1).strip().title()
+
+    if not dest:
+        for city_name in INDIA_CITIES:
+            if city_name.lower() in raw_lower:
+                if city_name.lower() != origin.lower():
+                    dest = city_name
+                    break
+
+    if not origin:
+        origin = "Delhi"
+
+    return dest, origin
 
 
 def _heuristic_parse(raw: str) -> dict[str, Any]:
-    """Simple heuristic: look for city names and numbers."""
+    """Parse trip details from raw text without LLM."""
     raw_lower = raw.lower()
-    dest = ""
-    
-    # Extended city list with better matching
-    city_keywords = {
-        "rishikesh": "Rishikesh",
-        "goa": "Goa",
-        "jaipur": "Jaipur",
-        "manali": "Manali",
-        "varanasi": "Varanasi",
-        "delhi": "Delhi",
-        "mumbai": "Mumbai",
-        "kerala": "Kochi",
-        "munnar": "Munnar",
-        "kochi": "Kochi",
-        "udaipur": "Udaipur",
-        "agra": "Agra",
-        "darjeeling": "Darjeeling",
-        "shimla": "Shimla",
-        "amritsar": "Amritsar",
-        "jodhpur": "Jodhpur",
-        "pushkar": "Pushkar",
-        "pondicherry": "Pondicherry",
-        "pondy": "Pondicherry",
-        "coorg": "Coorg",
-        "hampi": "Hampi",
-        "leh": "Leh",
-        "ladakh": "Leh",
-    }
-    
-    # Find the first matching city
-    for keyword, city_name in city_keywords.items():
-        if keyword in raw_lower:
-            dest = city_name
-            break
-    
-    origin = "Delhi"
-    if "mumbai" in raw_lower and "from" in raw_lower:
-        origin = "Mumbai"
-    elif "bangalore" in raw_lower and "from" in raw_lower:
-        origin = "Delhi"
-    
+
+    dest, origin = _extract_destination_heuristic(raw)
+
     budget = 15000
     for word in raw.split():
-        if "k" in word.lower() or "000" in word:
+        cleaned = word.replace(",", "").replace("₹", "")
+        if "k" in cleaned.lower() or "000" in cleaned:
             try:
-                budget = int(word.replace("k", "000").replace("K", "000").replace(",", ""))
-                if budget < 1000:
-                    budget *= 1000
+                num = int(cleaned.lower().replace("k", "000"))
+                if num < 1000:
+                    num *= 1000
+                budget = num
                 break
             except ValueError:
                 pass
-    
+
     start = date.today() + timedelta(days=7)
     end = start + timedelta(days=2)
     if "weekend" in raw_lower:
         end = start + timedelta(days=1)
-    if "week" in raw_lower or "4 day" in raw_lower or "4-day" in raw_lower:
-        end = start + timedelta(days=3)
-    if "5 day" in raw_lower or "5-day" in raw_lower:
-        end = start + timedelta(days=4)
-    
+    for n in range(2, 15):
+        if f"{n} day" in raw_lower or f"{n}-day" in raw_lower:
+            end = start + timedelta(days=n - 1)
+            break
+    if "week" in raw_lower and "weekend" not in raw_lower:
+        end = start + timedelta(days=6)
+
     style = "backpacker"
     if "luxury" in raw_lower:
         style = "luxury"
     elif "mid" in raw_lower or "midrange" in raw_lower:
         style = "balanced"
-    
-    interests = []
-    if "adventure" in raw_lower or "rafting" in raw_lower or "trekking" in raw_lower:
-        interests.append("adventure")
-    if "spiritual" in raw_lower or "yoga" in raw_lower or "temple" in raw_lower:
-        interests.append("spiritual")
-    if "culture" in raw_lower or "heritage" in raw_lower:
-        interests.append("culture")
-    if "beach" in raw_lower:
-        interests.append("beaches")
-    
+
+    traveler_type = "solo"
+    if "family" in raw_lower:
+        traveler_type = "family"
+    elif "couple" in raw_lower:
+        traveler_type = "couple"
+    elif "group" in raw_lower or "friends" in raw_lower:
+        traveler_type = "group"
+
+    interests: list[str] = []
+    interest_map = {
+        "adventure": ["adventure", "rafting", "trekking", "paragliding", "bungee"],
+        "spiritual": ["spiritual", "yoga", "temple", "meditation", "ashram"],
+        "culture": ["culture", "heritage", "history", "museum", "fort"],
+        "beaches": ["beach", "sea", "ocean", "coast"],
+        "nature": ["nature", "hills", "mountains", "valley", "scenic"],
+        "food": ["food", "culinary", "cuisine", "street food"],
+        "wildlife": ["wildlife", "safari", "jungle", "national park"],
+        "shopping": ["shopping", "market", "bazaar"],
+    }
+    for interest, keywords in interest_map.items():
+        if any(kw in raw_lower for kw in keywords):
+            interests.append(interest)
+
     return {
-        "destination": dest,  # Empty string if no match
+        "destination": dest,
         "origin": origin,
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "budget": float(budget),
         "currency": "INR",
-        "traveler_type": "solo",
+        "traveler_type": traveler_type,
         "travel_style": style,
         "interests": interests or ["adventure"],
         "num_travelers": 1,
@@ -109,6 +123,24 @@ def _heuristic_parse(raw: str) -> dict[str, Any]:
 def parse_intent_node(state: dict[str, Any]) -> dict[str, Any]:
     """Parse raw_query into trip_request; use GPT if available else heuristic."""
     start = time.time()
+
+    existing_req = state.get("trip_request") or {}
+    existing_dest = (existing_req.get("destination") or "").strip()
+    if existing_dest:
+        latency_ms = int((time.time() - start) * 1000)
+        return {
+            "trip_request": existing_req,
+            "current_stage": "intent_parsed",
+            "agent_decisions": [{
+                "agent_name": "intent_parser",
+                "action": "skip",
+                "reasoning": f"Trip request already has destination '{existing_dest}' — skipping re-parse.",
+                "result_summary": f"Destination: {existing_dest}",
+                "tokens_used": 0,
+                "latency_ms": latency_ms,
+            }],
+        }
+
     raw = (state.get("raw_query") or "").strip()
     if not raw:
         return {"current_stage": "intent_parsed", "agent_decisions": []}
@@ -119,25 +151,22 @@ def parse_intent_node(state: dict[str, Any]) -> dict[str, Any]:
         try:
             from openai import OpenAI
             client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            
-            # Build valid cities list for the LLM prompt
-            valid_cities = list(search_cities(""))  # Get all cities
-            city_names = [c.get("name", "") for c in valid_cities[:20]]  # Use first 20 for prompt
-            
+
+            today = date.today().isoformat()
+
             r = client.chat.completions.create(
                 model=settings.GPT4O_MODEL,
                 messages=[
-                    {"role": "system", "content": f"""Extract travel plan from the user message. Return only valid JSON with keys: destination (city), origin (city), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), budget (number), currency (INR), traveler_type (solo/couple/family/group), travel_style (backpacker/budget/balanced/luxury), interests (array of strings), num_travelers (number), special_requirements (string or null).
+                    {"role": "system", "content": f"""Extract travel plan from the user message. Return only valid JSON with keys: destination (city name), origin (city name), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), budget (number), currency (INR), traveler_type (solo/couple/family/group), travel_style (backpacker/budget/balanced/luxury), interests (array of strings), num_travelers (number), special_requirements (string or null).
 
-IMPORTANT: 
-- Use FULL city names from this list ONLY: {', '.join(city_names)}
-- If user says 'SA', interpret as 'South Africa' is NOT in India - ask for clarification or default to a popular Indian city
-- NEVER use abbreviations or short forms for destination/origin
-- Use today's date if not specified; for 'next weekend' use next Saturday-Sunday
-- Budget in INR
-- If destination is unclear, leave it empty for recommendation
-
-Example valid destinations: Rishikesh, Goa, Jaipur, Manali, Varanasi, Delhi, Mumbai, Kochi, Udaipur"""},
+IMPORTANT:
+- Accept ANY valid Indian city or town as destination — not limited to popular tourist cities.
+- Use the FULL city/town name exactly as the user wrote it (properly capitalized).
+- If the user mentions "from X to Y", X is origin and Y is destination.
+- Today's date is {today}. For 'next weekend' use next Saturday-Sunday.
+- Budget in INR. Default to 15000 if not specified.
+- If destination is genuinely unclear or not mentioned at all, leave it as empty string.
+- Do NOT leave destination empty if the user clearly named a city/town — even if it's a small or uncommon place."""},
                     {"role": "user", "content": raw},
                 ],
             )
@@ -146,39 +175,24 @@ Example valid destinations: Rishikesh, Goa, Jaipur, Manali, Varanasi, Delhi, Mum
                 if "```" in content:
                     content = content.split("```")[1].replace("json", "").strip()
                 req_dict = json.loads(content)
-                
-                # Validate and normalize destination name
-                dest = (req_dict.get("destination") or "").strip()
-                if dest:
-                    # Try exact match first
-                    matched_cities = search_cities(dest)
-                    if matched_cities:
-                        # Use the first matched city's canonical name
-                        req_dict["destination"] = matched_cities[0].get("name", dest)
-                    elif len(dest) < 4:  # Likely an abbreviation
-                        # Clear it so recommender runs
-                        req_dict["destination"] = ""
-                
+
                 for k in ("start_date", "end_date"):
                     if isinstance(req_dict.get(k), str):
                         req_dict[k] = date_parse(req_dict[k]).date().isoformat()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("LLM intent parsing failed: %s", exc)
+
     if not req_dict:
         req_dict = _heuristic_parse(raw)
+
     if isinstance(req_dict.get("start_date"), date):
         req_dict["start_date"] = req_dict["start_date"].isoformat()
     if isinstance(req_dict.get("end_date"), date):
         req_dict["end_date"] = req_dict["end_date"].isoformat()
-    
-    # Final validation: ensure destination is valid or empty
-    dest = (req_dict.get("destination") or "").strip()
-    if dest and len(dest) < 4:  # Likely abbreviation
-        req_dict["destination"] = ""  # Let recommender handle it
-    
+
     try:
         tr = TripRequest(
-            destination=req_dict.get("destination", ""),  # Empty if unclear
+            destination=req_dict.get("destination", ""),
             origin=req_dict.get("origin", "Delhi"),
             start_date=date.fromisoformat(str(req_dict.get("start_date", date.today()))[:10]),
             end_date=date.fromisoformat(str(req_dict.get("end_date", date.today() + timedelta(days=2)))[:10]),
@@ -200,7 +214,14 @@ Example valid destinations: Rishikesh, Goa, Jaipur, Manali, Varanasi, Delhi, Mum
 
     latency_ms = int((time.time() - start) * 1000)
     dest_result = trip_request.get('destination') or "To be recommended"
-    decision = {"agent_name": "intent_parser", "action": "parse", "reasoning": f"Parsed query: {raw[:100]}", "result_summary": f"Destination: {dest_result}", "tokens_used": 0, "latency_ms": latency_ms}
+    decision = {
+        "agent_name": "intent_parser",
+        "action": "parse",
+        "reasoning": f"Parsed query: {raw[:100]}",
+        "result_summary": f"Destination: {dest_result}",
+        "tokens_used": 0,
+        "latency_ms": latency_ms,
+    }
     return {
         "trip_request": trip_request,
         "current_stage": "intent_parsed",

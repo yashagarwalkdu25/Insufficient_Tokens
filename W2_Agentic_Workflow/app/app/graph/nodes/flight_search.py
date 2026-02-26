@@ -4,7 +4,7 @@
   flights are skipped entirely and only ground transport is returned.
 - When the destination city has no IATA code in INDIA_CITIES, the nearest major
   airport is located automatically.
-- Flight prices: Amadeus API -> LLM estimates -> booking URL fallback.
+- Flight prices: Amadeus API -> Tavily web search.
 - Ground transport (trains, buses, cabs): uses formula-based fare calculators
   with real Indian Railways fare structure and Ola/Uber/Rapido rate cards.
 """
@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from app.api.amadeus_client import AmadeusClient
+from app.api.tavily_client import TavilySearchClient
 from app.api.booking_links import (
     generate_skyscanner_flight_url,
     generate_makemytrip_flight_url,
@@ -26,15 +27,8 @@ from app.data.india_cities import get_city, INDIA_CITIES
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Distance threshold below which flights are skipped (km)
-# ---------------------------------------------------------------------------
 SHORT_DISTANCE_KM = 200
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _get_iata(city_name: str) -> str:
     """Return the IATA code for *city_name* if it exists in INDIA_CITIES."""
@@ -73,17 +67,17 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _find_nearest_airport(city_name: str) -> tuple[str, str]:
+def _find_nearest_airport(city_name: str) -> tuple[str, str] | None:
     """Find the nearest INDIA_CITIES entry that has a valid IATA code.
 
-    Returns (*airport_city_name*, *iata_code*).  Falls back to ``("Delhi", "DEL")``.
+    Returns (*airport_city_name*, *iata_code*) or None if coords are unknown.
     """
     coords = _get_coords(city_name)
     if coords is None:
-        return ("Delhi", "DEL")
+        return None
 
-    best_city = "Delhi"
-    best_iata = "DEL"
+    best_city = None
+    best_iata = None
     best_dist = float("inf")
     for name, data in INDIA_CITIES.items():
         iata = data.get("iata_code", "")
@@ -96,147 +90,19 @@ def _find_nearest_airport(city_name: str) -> tuple[str, str]:
             best_dist = d
             best_city = name
             best_iata = iata
-    return (best_city, best_iata)
-
-
-def _estimate_distance_with_llm(origin: str, destination: str) -> float | None:
-    """Ask GPT-4o-mini to estimate the straight-line distance in km.
-
-    Used when one or both cities are not in INDIA_CITIES so we have no coords.
-    Returns the estimated distance or *None* on failure.
-    """
-    settings = get_settings()
-    if not settings.has_openai:
-        return None
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-        prompt = (
-            f"What is the approximate straight-line distance in kilometres between "
-            f"{origin} and {destination} in India? Reply with ONLY a single integer "
-            f"(no units, no text). Example: 350"
-        )
-        r = client.chat.completions.create(
-            model=settings.GPT4O_MINI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=20,
-        )
-        content = (r.choices[0].message.content or "").strip()
-        return float(content)
-    except Exception as e:
-        logger.warning("LLM distance estimation failed: %s", e)
-        return None
+    if best_city and best_iata:
+        return (best_city, best_iata)
+    return None
 
 
 def _estimate_distance(origin: str, destination: str) -> float | None:
-    """Return estimated distance in km using coords or LLM fallback."""
+    """Return estimated distance in km using coords."""
     o_coords = _get_coords(origin)
     d_coords = _get_coords(destination)
     if o_coords and d_coords:
         return _haversine_km(o_coords[0], o_coords[1], d_coords[0], d_coords[1])
-    # Fallback to LLM
-    return _estimate_distance_with_llm(origin, destination)
+    return None
 
-
-def _llm_estimate_transport_prices(
-    origin: str,
-    destination: str,
-    distance_km: float | None,
-    include_flights: bool,
-) -> dict | None:
-    """Ask GPT-4o-mini for realistic transport price estimates.
-
-    Returns a dict like::
-
-        {
-            "flights": [
-                {"airline": "IndiGo", "price_inr": 4500, "duration_minutes": 120},
-                ...
-            ],
-            "trains": [
-                {"class": "3A", "price_inr": 800, "duration_minutes": 480, "operator": "IRCTC"},
-                ...
-            ],
-            "buses": [
-                {"type": "AC Sleeper", "price_inr": 600, "duration_minutes": 360, "operator": "RedBus"},
-                ...
-            ],
-            "taxi": {"price_inr": 3000, "duration_minutes": 180},
-            "reasoning": "..."
-        }
-
-    Returns *None* on failure.
-    """
-    settings = get_settings()
-    if not settings.has_openai:
-        return None
-
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-        distance_info = f"(approx {int(distance_km)} km apart)" if distance_km else ""
-        flight_instruction = (
-            "Include 2-3 realistic flight options with airline names common on this route."
-            if include_flights
-            else "Do NOT include flights — the cities are too close for commercial flights."
-        )
-
-        prompt = f"""You are an Indian travel pricing expert. Estimate realistic 2025 transport prices
-for travelling from {origin} to {destination} {distance_info}.
-
-{flight_instruction}
-
-Return ONLY valid JSON (no markdown fences):
-{{
-  "flights": [
-    {{"airline": "...", "price_inr": <int>, "duration_minutes": <int>}}
-  ],
-  "trains": [
-    {{"class": "3A/2A/SL", "price_inr": <int>, "duration_minutes": <int>, "operator": "IRCTC"}}
-  ],
-  "buses": [
-    {{"type": "AC Sleeper/Non-AC", "price_inr": <int>, "duration_minutes": <int>, "operator": "RedBus"}}
-  ],
-  "cab_options": [
-    {{"service": "Ola/Uber/Rapido", "type": "Sedan/SUV/Auto", "price_inr": <int>, "duration_minutes": <int>}}
-  ],
-  "reasoning": "Brief explanation of pricing logic"
-}}
-
-Rules:
-- All prices in INR
-- If flights don't operate on this route, return empty flights list
-- For trains include at least 2 classes (e.g. Sleeper, 3AC)
-- For buses include AC and non-AC options
-- Include cab_options with Ola, Uber, and Rapido estimates (Sedan, SUV, Auto-rickshaw where applicable)
-- For distances < 50km include auto-rickshaw via Rapido/Ola Auto
-- For distances 50-500km include outstation cab options (Ola Outstation, Uber Intercity)
-- Prices must be realistic for Indian domestic travel in 2025"""
-
-        r = client.chat.completions.create(
-            model=settings.GPT4O_MINI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=600,
-        )
-        content = (r.choices[0].message.content or "").strip()
-        if "```" in content:
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-            content = content.strip()
-        return json.loads(content)
-    except Exception as e:
-        logger.warning("LLM transport pricing failed: %s", e)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Main node
-# ---------------------------------------------------------------------------
 
 def search_flights_node(state: dict[str, Any]) -> dict[str, Any]:
     """LangGraph node: search flights and ground transport. Returns partial state update."""
@@ -272,26 +138,31 @@ def search_flights_node(state: dict[str, Any]) -> dict[str, Any]:
     reasoning_parts: list[str] = []
     tokens_used = 0
 
-    # ------------------------------------------------------------------
-    # 1.  Resolve IATA codes (find nearest airport for unknown cities)
-    # ------------------------------------------------------------------
+    # 1. Resolve IATA codes
     origin_iata = _get_iata(origin)
     dest_iata = _get_iata(dest)
 
     nearest_airport_note = ""
     if not origin_iata:
-        airport_city, origin_iata = _find_nearest_airport(origin)
-        nearest_airport_note += f"Origin '{origin}' has no airport — using nearest: {airport_city} ({origin_iata}). "
+        result = _find_nearest_airport(origin)
+        if result:
+            airport_city, origin_iata = result
+            nearest_airport_note += f"Origin '{origin}' has no airport — using nearest: {airport_city} ({origin_iata}). "
+        else:
+            nearest_airport_note += f"Origin '{origin}' has no known airport and coordinates unavailable. "
+
     if not dest_iata:
-        airport_city, dest_iata = _find_nearest_airport(dest)
-        nearest_airport_note += f"Destination '{dest}' has no airport — using nearest: {airport_city} ({dest_iata}). "
+        result = _find_nearest_airport(dest)
+        if result:
+            airport_city, dest_iata = result
+            nearest_airport_note += f"Destination '{dest}' has no airport — using nearest: {airport_city} ({dest_iata}). "
+        else:
+            nearest_airport_note += f"Destination '{dest}' has no known airport and coordinates unavailable. "
 
     if nearest_airport_note:
         reasoning_parts.append(nearest_airport_note.strip())
 
-    # ------------------------------------------------------------------
-    # 2.  Estimate distance and decide if flights make sense
-    # ------------------------------------------------------------------
+    # 2. Estimate distance and decide if flights make sense
     distance_km = _estimate_distance(origin, dest)
     is_short_distance = False
 
@@ -306,118 +177,74 @@ def search_flights_node(state: dict[str, Any]) -> dict[str, Any]:
     else:
         reasoning_parts.append("Could not estimate distance; will attempt flight search.")
 
-    # ------------------------------------------------------------------
-    # 3.  Flight search (only if distance warrants it)
-    # ------------------------------------------------------------------
-    amadeus_ok = False
+    # 3. Flight search (only if distance warrants it)
     if not is_short_distance:
-        # 3a. Try Amadeus API
-        try:
-            client = AmadeusClient()
-            flights = client.search_flights(origin_iata, dest_iata, dep_str, ret_str)
-            for f in flights:
-                out_flights.append(f.model_dump() if hasattr(f, "model_dump") else f)
-            if flights:
-                amadeus_ok = True
-                reasoning_parts.append(f"Amadeus API returned {len(flights)} flight options.")
-        except Exception as e:
-            reasoning_parts.append(f"Amadeus API failed ({e}); will try LLM estimates.")
+        # 3a. Try Amadeus API (only if we have IATA codes)
+        if origin_iata and dest_iata:
+            try:
+                client = AmadeusClient()
+                flights = client.search_flights(origin_iata, dest_iata, dep_str, ret_str)
+                for f in flights:
+                    out_flights.append(f.model_dump() if hasattr(f, "model_dump") else f)
+                if flights:
+                    reasoning_parts.append(f"Amadeus API returned {len(flights)} flight options.")
+            except Exception as e:
+                reasoning_parts.append(f"Amadeus API failed ({e}); trying Tavily web search.")
 
-        # 3b. If Amadeus failed, use LLM price estimates + booking URLs
+        # 3b. Tavily web search for flight information
         if not out_flights:
-            llm_prices = _llm_estimate_transport_prices(
-                origin, dest, distance_km, include_flights=True,
+            try:
+                tavily = TavilySearchClient()
+                if tavily.available:
+                    tavily_flights = tavily.search_flights(origin, dest, dep_str)
+                    if tavily_flights:
+                        sky_url = generate_skyscanner_flight_url(
+                            origin_iata or origin, dest_iata or dest, dep_str,
+                        )
+                        mmt_url = generate_makemytrip_flight_url(
+                            origin_iata or origin, dest_iata or dest, dep_str,
+                        )
+                        for i, tf in enumerate(tavily_flights[:5]):
+                            out_flights.append({
+                                "outbound": {
+                                    "airline": tf.get("title", "Search results"),
+                                    "departure_airport": origin_iata or origin,
+                                    "arrival_airport": dest_iata or dest,
+                                },
+                                "return_segment": None,
+                                "total_price": None,
+                                "currency": "INR",
+                                "booking_url": tf.get("booking_url") or (sky_url if i == 0 else mmt_url),
+                                "description": tf.get("content", ""),
+                                "source": "tavily_web",
+                                "verified": False,
+                            })
+                        reasoning_parts.append(
+                            f"Tavily web search found {len(out_flights)} flight-related results."
+                        )
+            except Exception as e:
+                reasoning_parts.append(f"Tavily flight search failed ({e}).")
+
+        if not out_flights and not is_short_distance:
+            reasoning_parts.append("No flight data found from any source.")
+
+    # 4. Ground transport (always included) — uses real fare calculators
+    if distance_km is not None:
+        try:
+            from app.api.fare_calculator import get_all_ground_transport
+            out_ground = get_all_ground_transport(origin, dest, distance_km, dep_str)
+            reasoning_parts.append(
+                f"Calculated {len(out_ground)} ground-transport options using "
+                f"Indian Railways fare structure + Ola/Uber/Rapido rate cards "
+                f"for {origin} -> {dest} (~{int(distance_km * 1.3)} km road distance)."
             )
+        except Exception as e:
+            logger.warning("Fare calculator failed: %s", e)
+            reasoning_parts.append(f"Ground transport calculation error: {e}")
+    else:
+        reasoning_parts.append("Distance unknown — could not calculate ground transport fares.")
 
-            if llm_prices and llm_prices.get("flights"):
-                for i, fp in enumerate(llm_prices["flights"][:3]):
-                    airline = fp.get("airline", "Airline")
-                    price = fp.get("price_inr") or fp.get("price_INR") or 0
-                    duration = fp.get("duration_minutes", 120)
-
-                    # Build real booking URLs so users can verify / book
-                    if i == 0:
-                        url = generate_skyscanner_flight_url(
-                            origin_iata, dest_iata, dep_str,
-                        )
-                    else:
-                        url = generate_makemytrip_flight_url(
-                            origin_iata, dest_iata, dep_str,
-                        )
-
-                    out_flights.append({
-                        "outbound": {
-                            "airline": airline,
-                            "departure_airport": origin_iata,
-                            "arrival_airport": dest_iata,
-                            "duration_minutes": duration,
-                        },
-                        "return_segment": None,
-                        "total_price": price,
-                        "currency": "INR",
-                        "booking_url": url,
-                        "source": "llm",
-                        "verified": False,
-                        "price_note": "LLM-estimated price — verify on booking site",
-                    })
-
-                reasoning_parts.append(
-                    f"LLM estimated {len(out_flights)} flight options with realistic prices."
-                )
-            else:
-                # Last-resort: booking URLs with no price
-                url = generate_skyscanner_flight_url(origin_iata, dest_iata, dep_str)
-                out_flights.append({
-                    "outbound": {
-                        "airline": "Search on Skyscanner",
-                        "departure_airport": origin_iata,
-                        "arrival_airport": dest_iata,
-                    },
-                    "return_segment": None,
-                    "total_price": None,
-                    "currency": "INR",
-                    "booking_url": url,
-                    "source": "curated",
-                    "verified": False,
-                })
-                url2 = generate_makemytrip_flight_url(origin_iata, dest_iata, dep_str)
-                out_flights.append({
-                    "outbound": {
-                        "airline": "Search on MakeMyTrip",
-                        "departure_airport": origin_iata,
-                        "arrival_airport": dest_iata,
-                    },
-                    "return_segment": None,
-                    "total_price": None,
-                    "currency": "INR",
-                    "booking_url": url2,
-                    "source": "curated",
-                    "verified": False,
-                })
-                reasoning_parts.append(
-                    "Generated Skyscanner + MakeMyTrip booking URLs as fallback (no price available)."
-                )
-
-    # ------------------------------------------------------------------
-    # 4.  Ground transport (always included) — uses real fare calculators
-    # ------------------------------------------------------------------
-    try:
-        from app.api.fare_calculator import get_all_ground_transport
-
-        dk = distance_km or 100  # fallback if distance unknown
-        out_ground = get_all_ground_transport(origin, dest, dk, dep_str)
-        reasoning_parts.append(
-            f"Calculated {len(out_ground)} ground-transport options using "
-            f"Indian Railways fare structure + Ola/Uber/Rapido rate cards "
-            f"for {origin} -> {dest} (~{int(dk * 1.3)} km road distance)."
-        )
-    except Exception as e:
-        logger.warning("Fare calculator failed: %s", e)
-        reasoning_parts.append(f"Ground transport calculation error: {e}")
-
-    # ------------------------------------------------------------------
-    # 5.  Build agent decision and return
-    # ------------------------------------------------------------------
+    # 5. Build agent decision and return
     latency_ms = int((time.time() - start) * 1000)
     decision = {
         "agent_name": "flight_search",

@@ -4,14 +4,67 @@ Sync only; no asyncio.
 """
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Generator
+from typing import Any, Generator, Literal
 
+from app.config import get_settings
 from app.graph.state import create_initial_state
 from app.graph.builder import build_travel_graph
 from app.memory.working_memory import WorkingMemoryManager
+from app.memory.conversation_memory import ConversationMemoryManager
 
 logger = logging.getLogger(__name__)
+
+
+def classify_chat_intent(message: str, has_trip: bool) -> Literal["conversation", "modify", "plan"]:
+    """Quick intent classification without invoking the full graph.
+
+    Uses GPT-4o-mini for a single fast call. Falls back to heuristic.
+    """
+    settings = get_settings()
+
+    if settings.has_openai:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            r = client.chat.completions.create(
+                model=settings.GPT4O_MINI_MODEL,
+                messages=[
+                    {"role": "system", "content": (
+                        "Classify the user message into exactly one category. "
+                        "Reply with ONLY the single word: conversation, modify, or plan.\n\n"
+                        "- conversation: questions, info requests, tips, advice, "
+                        "asking about the trip, weather, packing, food, safety, costs, schedule "
+                        "(anything that does NOT require changing the itinerary)\n"
+                        "- modify: explicit requests to CHANGE something in the plan "
+                        "(swap hotel, add activity, make cheaper, remove day, change dates, extend trip)\n"
+                        "- plan: requests to create a brand NEW trip from scratch\n\n"
+                        f"Context: User {'HAS' if has_trip else 'DOES NOT have'} an existing trip."
+                    )},
+                    {"role": "user", "content": message},
+                ],
+                temperature=0,
+                max_tokens=10,
+            )
+            result = (r.choices[0].message.content or "").strip().lower()
+            if result in ("conversation", "modify", "plan"):
+                return result
+        except Exception as exc:
+            logger.warning("Quick intent classification failed: %s", exc)
+
+    msg_lower = message.lower()
+    plan_signals = ["plan a trip", "new trip", "i want to go", "let's plan", "book a trip"]
+    modify_signals = [
+        "change", "swap", "replace", "remove", "add more", "make it cheaper",
+        "make cheaper", "extend", "shorten", "different hotel", "upgrade",
+        "switch", "modify", "update the", "adjust",
+    ]
+    if any(s in msg_lower for s in plan_signals):
+        return "plan"
+    if has_trip and any(s in msg_lower for s in modify_signals):
+        return "modify"
+    return "conversation"
 
 
 class GraphRunner:
@@ -20,6 +73,30 @@ class GraphRunner:
     def __init__(self):
         self.graph = build_travel_graph()
         self.memory = WorkingMemoryManager()
+        self.conv_memory = ConversationMemoryManager()
+
+    def chat(self, message: str, session_id: str) -> str:
+        """Handle a conversation message directly without the full graph.
+
+        Calls conversation_handler_node in isolation for fast Q&A.
+        Returns the assistant response string.
+        """
+        logger.info("chat() | session_id=%s msg_len=%s", session_id[:8], len(message))
+        state = self.memory.load_state(session_id) or {}
+        state["user_feedback"] = message
+        state["raw_query"] = message
+
+        self.conv_memory.add_message(session_id, "user", message)
+
+        from app.graph.nodes.conversation_handler import conversation_handler_node
+        result = conversation_handler_node(state)
+        response = result.get("conversation_response", "")
+
+        if response:
+            self.conv_memory.add_message(session_id, "assistant", response)
+
+        logger.info("chat() done | session_id=%s response_len=%s", session_id[:8], len(response))
+        return response
 
     def run(
         self,
@@ -59,10 +136,19 @@ class GraphRunner:
                 return {}
             if user_feedback:
                 state["user_feedback"] = user_feedback
+                self.conv_memory.add_message(session_id, "user", user_feedback)
             if approval is not None:
                 state["requires_approval"] = False
             final = self.graph.invoke(state, config=config)
             self.memory.save_state(session_id, dict(final))
+
+            if final.get("conversation_response"):
+                self.conv_memory.add_message(session_id, "assistant", final["conversation_response"])
+
+            msg_count = len(self.conv_memory.get_recent_messages(session_id, limit=100))
+            if msg_count > 0 and msg_count % 5 == 0:
+                self.conv_memory.compress_old_messages(session_id)
+
             logger.info("resume() done | session_id=%s has_trip=%s", session_id[:8], bool(final.get("trip")))
             return final
         except Exception as e:
@@ -89,6 +175,11 @@ class GraphRunner:
             snap = self.graph.get_state(config)
             final = getattr(snap, "values", snap) or {}
             self.memory.save_state(session_id, dict(final) if not isinstance(final, dict) else final)
+
+            self.conv_memory.add_message(session_id, "user", user_input)
+            if isinstance(final, dict) and final.get("conversation_response"):
+                self.conv_memory.add_message(session_id, "assistant", final["conversation_response"])
+
             logger.info("stream() done | session_id=%s nodes=%s has_trip=%s", session_id[:8], node_count, bool(final.get("trip") if isinstance(final, dict) else False))
         except Exception as e:
             logger.exception("Graph stream failed: %s", e)

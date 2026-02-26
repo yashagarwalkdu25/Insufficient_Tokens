@@ -649,6 +649,43 @@ header[data-testid="stHeader"] {
   width: 21rem !important;
 }
 
+
+/* ── Chat message styling ─────────────────────────────────── */
+[data-testid="stSidebar"] [data-testid="stChatMessage"] {
+  background: transparent !important;
+  padding: 0.4rem 0 !important;
+  border: none !important;
+}
+[data-testid="stSidebar"] [data-testid="stChatMessage"][data-testid-role="assistant"] {
+  background: rgba(26,86,83,0.04) !important;
+  border-radius: 10px !important;
+  padding: 0.5rem 0.6rem !important;
+}
+/* Smooth page transitions */
+.stApp .block-container {
+  animation: ts-fade-in 0.4s ease-out;
+}
+@keyframes ts-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Loading spinner brand color */
+.stSpinner > div {
+  border-top-color: var(--ts-teal) !important;
+}
+/* Download buttons in share modal */
+.ts-share-card .stDownloadButton > button {
+  background: linear-gradient(135deg, var(--ts-teal) 0%, var(--ts-teal-light) 100%) !important;
+  color: #FFF !important;
+  border: none !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+}
+.ts-share-card .stDownloadButton > button:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: var(--ts-shadow-hover) !important;
+}
+
 /* ─── Responsive ───────────────────────────────────────────── */
 @media (max-width: 768px) {
   .ts-hero { padding: 1.4rem 1.2rem 1.2rem; }

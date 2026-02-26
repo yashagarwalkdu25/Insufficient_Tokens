@@ -1,7 +1,7 @@
 """
 OpenWeatherMap 5-day forecast client.
 Returns daily summary (temp_min, temp_max, condition, rain_probability).
-Fallback: seasonal averages from static data when API key missing.
+No hardcoded fallback data — returns empty when API key missing or call fails.
 """
 from typing import Any
 
@@ -9,17 +9,9 @@ import httpx
 
 from app.config import get_settings
 
-# Fallback daily summary when no API (generic)
-FALLBACK_WEATHER = {
-    "temp_min": 22,
-    "temp_max": 32,
-    "condition": "Partly cloudy",
-    "rain_probability": 10,
-}
-
 
 class WeatherClient:
-    """OpenWeatherMap forecast; graceful empty/fallback when key missing."""
+    """OpenWeatherMap forecast; returns empty dict when key missing or API fails."""
 
     def __init__(self):
         self.timeout = 10.0
@@ -33,7 +25,7 @@ class WeatherClient:
         """Return dict keyed by date with temp_min, temp_max, condition, rain_probability."""
         settings = get_settings()
         if not settings.OPENWEATHERMAP_KEY:
-            return self._fallback_forecast(days)
+            return {}
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 r = client.get(
@@ -49,9 +41,8 @@ class WeatherClient:
                 r.raise_for_status()
                 data = r.json()
         except Exception:
-            return self._fallback_forecast(days)
+            return {}
 
-        from datetime import datetime, timedelta
         list_ = data.get("list", [])
         by_date: dict[str, Any] = {}
         for item in list_:
@@ -71,15 +62,6 @@ class WeatherClient:
                     by_date[dt_str]["temp_min"] = min(by_date[dt_str]["temp_min"], t)
                     by_date[dt_str]["temp_max"] = max(by_date[dt_str]["temp_max"], t)
         return by_date
-
-    def _fallback_forecast(self, days: int) -> dict[str, Any]:
-        from datetime import datetime, timedelta
-        out = {}
-        d = datetime.utcnow().date()
-        for _ in range(days):
-            out[d.isoformat()] = dict(FALLBACK_WEATHER)
-            d += timedelta(days=1)
-        return out
 
     def get_weather_summary(
         self,

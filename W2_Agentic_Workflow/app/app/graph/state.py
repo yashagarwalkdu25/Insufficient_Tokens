@@ -61,6 +61,7 @@ class TravelPlannerState(TypedDict, total=False):
     errors: Annotated[list, _dedupe_reducer]
     destination_options: list[dict]
     conversation_response: Optional[str]
+    validation_issues: list[dict]
 
 
 def create_initial_state(
@@ -101,4 +102,5 @@ def create_initial_state(
         errors=[],
         destination_options=[],
         conversation_response=None,
+        validation_issues=[],
     )

@@ -5,11 +5,23 @@ import streamlit as st
 from typing import Any
 
 ICON_MAP = {
-    "transport":  ("✈️",  "ts-icon-transport"),
+    "transport":  ("🚌",  "ts-icon-transport"),
     "hotel":      ("🏡",  "ts-icon-hotel"),
     "activity":   ("🎭",  "ts-icon-activity"),
     "meal":       ("🍽️", "ts-icon-meal"),
     "free_time":  ("🏖️", "ts-icon-free"),
+}
+
+TRANSPORT_MODE_ICON = {
+    "flight":  "✈️",
+    "train":   "🚂",
+    "bus":     "🚌",
+    "cab":     "🚕",
+    "auto":    "🛺",
+    "walk":    "🚶",
+    "metro":   "🚇",
+    "ferry":   "⛴️",
+    "bike":    "🏍️",
 }
 
 DAY_COLORS = ["ts-day-1", "ts-day-2", "ts-day-3", "ts-day-4", "ts-day-5", "ts-day-6", "ts-day-7"]
@@ -45,6 +57,25 @@ def render_itinerary(trip: dict[str, Any], state: dict[str, Any]) -> None:
             for idx, item in enumerate(items):
                 itype = item.get("item_type", "activity")
                 emoji, icon_cls = ICON_MAP.get(itype, ("•", "ts-icon-activity"))
+                if itype == "transport":
+                    mode = (item.get("travel_mode") or "").lower()
+                    if not mode:
+                        title_lower = item.get("title", "").lower()
+                        if "flight" in title_lower or "fly" in title_lower or "airport" in title_lower:
+                            mode = "flight"
+                        elif "train" in title_lower or "express" in title_lower or "railway" in title_lower or "shatabdi" in title_lower:
+                            mode = "train"
+                        elif "bus" in title_lower:
+                            mode = "bus"
+                        elif "cab" in title_lower or "taxi" in title_lower or "uber" in title_lower or "ola" in title_lower:
+                            mode = "cab"
+                        elif "auto" in title_lower or "rickshaw" in title_lower:
+                            mode = "auto"
+                        elif "walk" in title_lower:
+                            mode = "walk"
+                        elif "metro" in title_lower:
+                            mode = "metro"
+                    emoji = TRANSPORT_MODE_ICON.get(mode, "🚌")
                 time_str = item.get("time", "")
                 title = item.get("title", "")
                 cost = item.get("cost", 0)

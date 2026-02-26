@@ -17,7 +17,7 @@ class LocalTip(BaseModel):
     source_platform: str = Field(..., description="e.g. reddit, curated")
     source_url: Optional[str] = Field(default=None)
     upvotes: int = Field(default=0, ge=0)
-    source: Literal["api", "curated", "llm"] = Field(...)
+    source: Literal["api", "curated", "llm", "tavily_web"] = Field(...)
     verified: bool = Field(default=False)
 
 
@@ -32,5 +32,5 @@ class HiddenGem(BaseModel):
     latitude: Optional[float] = Field(default=None)
     longitude: Optional[float] = Field(default=None)
     confidence: float = Field(default=1.0, ge=0, le=1, description="Confidence score 0-1")
-    source: Literal["api", "curated", "llm"] = Field(...)
+    source: Literal["api", "curated", "llm", "tavily_web"] = Field(...)
     verified: bool = Field(default=False)

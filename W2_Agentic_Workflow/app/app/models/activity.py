@@ -28,7 +28,7 @@ class Activity(BaseModel):
     )
     phone: Optional[str] = Field(default=None)
     best_time: Optional[str] = Field(default=None, description="Recommended time of day")
-    source: Literal["api", "curated", "llm"] = Field(...)
+    source: Literal["api", "curated", "llm", "tavily_web"] = Field(...)
     verified: bool = Field(default=False)
 
 
@@ -44,5 +44,5 @@ class Restaurant(BaseModel):
     longitude: Optional[float] = Field(default=None)
     phone: Optional[str] = Field(default=None)
     opening_hours: Optional[Dict[str, str]] = Field(default=None)
-    source: Literal["api", "curated", "llm"] = Field(...)
+    source: Literal["api", "curated", "llm", "tavily_web"] = Field(...)
     verified: bool = Field(default=False)

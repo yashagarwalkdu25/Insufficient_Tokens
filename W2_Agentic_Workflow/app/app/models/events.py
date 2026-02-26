@@ -20,7 +20,7 @@ class Event(BaseModel):
     event_type: str = Field(..., description="e.g. festival, holiday, sports")
     impact: Literal["positive", "negative", "neutral"] = Field(...)
     recommendation: Optional[str] = Field(default=None)
-    source: Literal["api", "curated", "llm"] = Field(...)
+    source: Literal["api", "curated", "llm", "tavily_web"] = Field(...)
     verified: bool = Field(default=False)
 
 

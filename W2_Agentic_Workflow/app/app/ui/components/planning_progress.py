@@ -22,6 +22,7 @@ AGENT_LABELS = {
     "approval_gate":           ("⏸️",  "Approval checkpoint"),
     "budget_optimizer":        ("💰", "Optimizing your budget"),
     "itinerary_builder":       ("📖", "Crafting your itinerary"),
+    "response_validator":      ("🛡️", "Validating & fact-checking"),
     "vibe_scorer":             ("🎯", "Scoring trip vibe"),
 }
 
@@ -58,6 +59,11 @@ def _preview_text(node_name: str, partial_state: dict[str, Any]) -> str:
         trip = partial_state.get("trip") or {}
         days = len(trip.get("days") or [])
         return f"{days} days · ₹{trip.get('total_cost', 0):,.0f}"
+    if node_name == "response_validator":
+        issues = partial_state.get("validation_issues") or []
+        if issues:
+            return f"{len(issues)} items flagged for review"
+        return "All items verified"
     if node_name == "vibe_scorer":
         vs = partial_state.get("vibe_score") or {}
         return f"{vs.get('overall_score', '—')}/100 — {vs.get('tagline', '')}"

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     OPENWEATHERMAP_KEY: Optional[str] = Field(default=None, description="OpenWeatherMap API key")
     REDDIT_CLIENT_ID: Optional[str] = Field(default=None, description="Reddit API client ID for local tips")
     REDDIT_CLIENT_SECRET: Optional[str] = Field(default=None, description="Reddit API client secret")
+    TAVILY_API_KEY: Optional[str] = Field(default=None, description="Tavily API key for web search fallback")
 
     # Model configs
     GPT4O_MODEL: str = Field(default="gpt-4o", description="Model for complex tasks (intent, itinerary)")
@@ -69,6 +70,10 @@ class Settings(BaseSettings):
     @property
     def has_reddit(self) -> bool:
         return bool(self.REDDIT_CLIENT_ID and self.REDDIT_CLIENT_SECRET)
+
+    @property
+    def has_tavily(self) -> bool:
+        return bool(self.TAVILY_API_KEY)
 
 
 @lru_cache

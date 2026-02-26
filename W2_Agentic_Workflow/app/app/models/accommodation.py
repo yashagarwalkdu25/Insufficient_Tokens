@@ -27,5 +27,5 @@ class HotelOption(BaseModel):
     contact_info: Optional[str] = Field(default=None, description="Combined phone/address for display")
     check_in_time: Optional[str] = Field(default=None)
     check_out_time: Optional[str] = Field(default=None)
-    source: Literal["api", "curated", "llm", "estimated"] = Field(...)
+    source: Literal["api", "curated", "llm", "estimated", "tavily_web"] = Field(...)
     verified: bool = Field(default=False)
