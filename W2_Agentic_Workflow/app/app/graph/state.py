@@ -4,7 +4,7 @@ Custom reducer for list fields: merge and deduplicate by key (no operator.add).
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, Optional, TypedDict
+from typing import Annotated, Any, List, Optional, TypedDict
 
 
 def _dedupe_reducer(current: list[Any], update: Optional[list[Any]]) -> list[Any]:
@@ -63,6 +63,17 @@ class TravelPlannerState(TypedDict, total=False):
     conversation_response: Optional[str]
     validation_issues: list[dict]
 
+    # --- AI Travel Negotiator fields ---
+    use_negotiator: bool                         # user opt-in from onboarding toggle
+    bundles: list[dict]                          # list[BundleChoice.model_dump()]
+    selected_bundle_id: Optional[str]            # "budget_saver" | "best_value" | "experience_max"
+    what_if_history: list[dict]                  # list[WhatIfRequest.model_dump()]
+    what_if_delta: int                           # cumulative budget delta from what-if requests
+    negotiation_log: Annotated[list, _dedupe_reducer]  # transparency log lines
+    feasibility_passed: bool
+    feasibility_issues: list[str]
+    _negotiator_cache_key: Optional[str]         # internal cache key — do not display
+
 
 def create_initial_state(
     user_id: str = "",
@@ -103,4 +114,13 @@ def create_initial_state(
         destination_options=[],
         conversation_response=None,
         validation_issues=[],
+        use_negotiator=True,
+        bundles=[],
+        selected_bundle_id=None,
+        what_if_history=[],
+        what_if_delta=0,
+        negotiation_log=[],
+        feasibility_passed=False,
+        feasibility_issues=[],
+        _negotiator_cache_key=None,
     )

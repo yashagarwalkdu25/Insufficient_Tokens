@@ -103,11 +103,13 @@ class GraphRunner:
         user_input: str,
         session_id: str,
         user_id: str,
+        use_negotiator: bool = True,
     ) -> dict[str, Any]:
         """Create initial state, invoke graph, persist and return final state."""
-        logger.info("run() | session_id=%s query_len=%s", session_id[:8], len(user_input))
+        logger.info("run() | session_id=%s query_len=%s use_negotiator=%s", session_id[:8], len(user_input), use_negotiator)
         config = {"configurable": {"thread_id": session_id}}
         initial = create_initial_state(user_id=user_id, session_id=session_id, raw_query=user_input)
+        initial["use_negotiator"] = use_negotiator
         try:
             final = self.graph.invoke(initial, config=config)
             self.memory.save_state(session_id, dict(final))
@@ -160,11 +162,13 @@ class GraphRunner:
         user_input: str,
         session_id: str,
         user_id: str,
+        use_negotiator: bool = True,
     ) -> Generator[tuple[str, dict], None, None]:
         """Stream graph execution; yield (node_name, partial_state) tuples."""
-        logger.info("stream() start | session_id=%s query_len=%s", session_id[:8], len(user_input))
+        logger.info("stream() start | session_id=%s query_len=%s use_negotiator=%s", session_id[:8], len(user_input), use_negotiator)
         config = {"configurable": {"thread_id": session_id}}
         initial = create_initial_state(user_id=user_id, session_id=session_id, raw_query=user_input)
+        initial["use_negotiator"] = use_negotiator
         node_count = 0
         try:
             for event in self.graph.stream(initial, config=config):

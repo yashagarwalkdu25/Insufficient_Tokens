@@ -139,7 +139,8 @@ elif st.session_state["current_screen"] == "planning":
         st.rerun()
     elif query:
         runner = GraphRunner()
-        gen = runner.stream(query, session_id, st.session_state["user_id"])
+        use_negotiator = st.session_state.get("use_negotiator", True)
+        gen = runner.stream(query, session_id, st.session_state["user_id"], use_negotiator=use_negotiator)
         done = render_planning_progress(gen)
         if done:
             loaded = memory.load_state(session_id)
@@ -147,20 +148,27 @@ elif st.session_state["current_screen"] == "planning":
                 st.session_state["trip_state"] = loaded
             trip_state = st.session_state.get("trip_state") or {}
 
-            if trip_state.get("requires_approval"):
+            # If we have bundles but no trip yet, show the bundles (details) page first —
+            # do not show the approval screen. Approval ("Review your itinerary") comes
+            # after the user selects a bundle and the itinerary is built.
+            has_bundles = bool(trip_state.get("bundles"))
+            has_trip = bool(trip_state.get("trip"))
+
+            if trip_state.get("requires_approval") and not (has_bundles and not has_trip):
                 approval_type = trip_state.get("approval_type", "")
                 logger.info("Planning done → approval required | type=%s", approval_type)
                 st.session_state["show_approval"] = True
                 st.session_state["current_screen"] = "dashboard"
                 st.rerun()
-            elif trip_state.get("trip"):
+            elif has_trip:
                 logger.info("Planning done → dashboard (trip ready)")
                 st.session_state["current_screen"] = "dashboard"
                 st.balloons()
                 import time as _t; _t.sleep(1.5)
                 st.rerun()
             else:
-                logger.info("Planning done → dashboard (no trip in state)")
+                # No trip: go to dashboard; bundles view will show if we have bundles
+                logger.info("Planning done → dashboard (bundles=%s)", has_bundles)
                 st.session_state["current_screen"] = "dashboard"
                 st.rerun()
     if st.button("Go to dashboard", key="goto_dashboard"):
@@ -179,9 +187,9 @@ elif st.session_state.get("show_approval"):
     logger.info("Screen: approval")
     from app.ui.components.approval_section import render_approval
     state = st.session_state["trip_state"]
+    approval_type = state.get("approval_type", "")
 
     def on_approve():
-        approval_type = state.get("approval_type", "")
         if approval_type == "destination":
             logger.info("Action: approve destination → resume planning")
             st.session_state["show_approval"] = False
@@ -211,15 +219,72 @@ elif st.session_state.get("show_approval"):
         st.session_state["chat_messages"] = []
         st.rerun()
 
+    # For itinerary approval: show full dashboard (details) first, then review card + actions
+    if approval_type == "itinerary" and state.get("trip"):
+        from app.ui.components.trip_dashboard import render_trip_dashboard
+        render_trip_dashboard(state)
+        st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
     render_approval(state, on_approve, on_modify, on_reset)
 
 else:
     state = st.session_state["trip_state"]
     trip = state.get("trip")
-    if trip:
+
+    # ── AI Travel Negotiator: show bundles panel before itinerary ──────────
+    bundles = state.get("bundles") or []
+    selected_bundle_id = state.get("selected_bundle_id")
+    bundles_proceed = st.session_state.get("bundles_proceed", False)
+
+    if bundles and not trip and not bundles_proceed:
+        logger.info("Screen: bundles | n_bundles=%d selected=%s", len(bundles), selected_bundle_id)
+        from app.ui.components.bundles_view import render_bundles_view
+        from app.graph.nodes.negotiator import apply_what_if
+
+        def _on_bundle_selected(bundle_id: str) -> None:
+            logger.info("Bundle selected: %s", bundle_id)
+            st.session_state["trip_state"]["selected_bundle_id"] = bundle_id
+            # Propagate selected bundle's transport/stay/activities into state
+            # so budget_optimizer and itinerary_builder pick them up
+            for b in bundles:
+                if b.get("id") == bundle_id:
+                    st.session_state["trip_state"]["selected_outbound_flight"] = b.get("transport")
+                    st.session_state["trip_state"]["selected_hotel"] = b.get("stay")
+                    st.session_state["trip_state"]["selected_activities"] = b.get("activities") or []
+                    break
+            memory.save_state(session_id, st.session_state["trip_state"])
+            st.rerun()
+
+        def _on_whatif(delta: int) -> None:
+            logger.info("What-if applied: delta=%d", delta)
+            updated = apply_what_if(st.session_state["trip_state"], delta)
+            st.session_state["trip_state"] = updated
+            memory.save_state(session_id, updated)
+            st.rerun()
+
+        render_bundles_view(
+            state=st.session_state["trip_state"],
+            on_bundle_selected=_on_bundle_selected,
+            on_whatif=_on_whatif,
+        )
+
+    elif bundles_proceed and selected_bundle_id and not trip:
+        # User clicked "Build Itinerary" — resume graph from budget_optimizer
+        logger.info("Bundles: proceeding to itinerary build | bundle=%s", selected_bundle_id)
+        st.session_state["bundles_proceed"] = False
+        runner = GraphRunner()
+        out = runner.resume(session_id, user_feedback=None, approval=True)
+        st.session_state["trip_state"] = out
+        if out.get("trip"):
+            st.session_state["current_screen"] = "dashboard"
+            st.balloons()
+            import time as _t; _t.sleep(1.5)
+        st.rerun()
+
+    elif trip:
         logger.info("Screen: dashboard | destination=%s", trip.get("destination", "?"))
         from app.ui.components.trip_dashboard import render_trip_dashboard
         render_trip_dashboard(state)
+
     else:
         logger.info("Screen: dashboard (no trip)")
         st.info("No itinerary yet. Use the form or describe your trip to get started.")

@@ -19,6 +19,8 @@ AGENT_LABELS = {
     "local_intel":             ("🗣️", "Gathering local secrets"),
     "festival_check":          ("🪔", "Checking festivals & events"),
     "enrichment_aggregator":   ("📦", "Merging enrichment"),
+    "negotiator":              ("🤝", "Negotiating travel bundles"),
+    "feasibility_validator":   ("✅", "Validating bundle feasibility"),
     "approval_gate":           ("⏸️",  "Approval checkpoint"),
     "budget_optimizer":        ("💰", "Optimizing your budget"),
     "itinerary_builder":       ("📖", "Crafting your itinerary"),
@@ -79,6 +81,19 @@ def _preview_text(node_name: str, partial_state: dict[str, Any]) -> str:
     if node_name == "vibe_scorer":
         vs = partial_state.get("vibe_score") or {}
         return f"{vs.get('overall_score', '—')}/100 — {vs.get('tagline', '')}"
+    if node_name == "negotiator":
+        bundles = partial_state.get("bundles") or []
+        if bundles:
+            return f"{len(bundles)} bundles created"
+        return "Building options..."
+    if node_name == "feasibility_validator":
+        passed = partial_state.get("feasibility_passed")
+        issues = partial_state.get("feasibility_issues") or []
+        if passed is True:
+            return "All bundles feasible"
+        if issues:
+            return f"{len(issues)} issue(s) auto-resolved"
+        return "Checking constraints..."
     if node_name == "approval_gate":
         stage = partial_state.get("current_stage", "")
         return "Trip complete!" if "trip_complete" in stage else "Checkpoint passed"

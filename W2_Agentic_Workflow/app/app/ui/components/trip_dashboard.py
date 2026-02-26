@@ -48,34 +48,65 @@ def render_trip_dashboard(state: dict[str, Any]) -> None:
     st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "Itinerary",
-        "Map",
-        "Budget",
-        "Local Secrets",
-        "Vibe Score",
-        "AI Reasoning",
-    ])
-    with tab1:
+    has_bundles = bool(state.get("bundles"))
+    tab_labels = ["Itinerary", "Map", "Budget", "Local Secrets", "Vibe Score", "AI Reasoning"]
+    if has_bundles:
+        tab_labels.insert(1, "Bundles")
+
+    tabs = st.tabs(tab_labels)
+    tab_idx = 0
+
+    with tabs[tab_idx]:
         from app.ui.components.itinerary_editor import render_itinerary
         render_itinerary(trip, state)
-    with tab2:
+    tab_idx += 1
+
+    if has_bundles:
+        with tabs[tab_idx]:
+            from app.ui.components.bundles_view import render_bundles_view
+
+            def _noop_select(bid: str) -> None:
+                st.session_state["trip_state"]["selected_bundle_id"] = bid
+                st.rerun()
+
+            def _noop_whatif(delta: int) -> None:
+                from app.graph.nodes.negotiator import apply_what_if
+                updated = apply_what_if(st.session_state["trip_state"], delta)
+                st.session_state["trip_state"] = updated
+                st.rerun()
+
+            render_bundles_view(
+                state=state,
+                on_bundle_selected=_noop_select,
+                on_whatif=_noop_whatif,
+            )
+        tab_idx += 1
+
+    with tabs[tab_idx]:
         from app.ui.components.map_view import render_map
         render_map(trip)
-    with tab3:
+    tab_idx += 1
+
+    with tabs[tab_idx]:
         from app.ui.components.budget_view import render_budget
         render_budget(state.get("budget_tracker"), state)
-    with tab4:
+    tab_idx += 1
+
+    with tabs[tab_idx]:
         from app.ui.components.local_tips_view import render_local_tips
         render_local_tips(
             state.get("local_tips") or [],
             state.get("hidden_gems") or [],
             state.get("events") or [],
         )
-    with tab5:
+    tab_idx += 1
+
+    with tabs[tab_idx]:
         from app.ui.components.vibe_score_view import render_vibe_score
         render_vibe_score(state.get("vibe_score"))
-    with tab6:
+    tab_idx += 1
+
+    with tabs[tab_idx]:
         from app.ui.components.reasoning_view import render_reasoning
         render_reasoning(state.get("agent_decisions") or [])
 

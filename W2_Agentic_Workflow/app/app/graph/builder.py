@@ -1,12 +1,16 @@
 """
-Build the travel planning LangGraph with TRUE parallel fan-out + response validation.
+Build the travel planning LangGraph with TRUE parallel fan-out + response validation
+and the AI Travel Negotiator (Trade-Off Negotiation Engine).
 
 Architecture:
   supervisor → intent_parser →[conditional]→ destination_recommender → approval_gate
                                            →[Send fan-out]→ flight_search     ─┐
                                                           → hotel_search      ─┤→ search_aggregator →[Send fan-out]→ local_intel    ─┐
-                                                          → activity_search   ─┤                                   → festival_check ─┤→ enrichment_aggregator → approval_gate
+                                                          → activity_search   ─┤                                   → festival_check ─┤→ enrichment_aggregator
                                                           → weather_check     ─┘
+
+  enrichment_aggregator → negotiator → feasibility_validator →[passed]→ approval_gate
+                                              ↑ (loop back on failure — max 2 retries)
 
   approval_gate →[conditional]→ budget_optimizer → itinerary_builder → response_validator → vibe_scorer → approval_gate → END
 
@@ -41,6 +45,7 @@ from app.graph.nodes.budget_optimizer import optimize_budget_node
 from app.graph.nodes.itinerary_builder import build_itinerary_node
 from app.graph.nodes.vibe_scorer import score_vibe_node
 from app.graph.nodes.response_validator import validate_response_node
+from app.graph.nodes.negotiator import negotiate_bundles_node, feasibility_validator_node
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +146,35 @@ def _route_after_approval(state: dict) -> str:
     stage = state.get("current_stage", "")
     if "dest" in stage or "destination" in stage:
         return "search_dispatcher"
-    if "enrichment" in stage:
+    if "enrichment" in stage or "negotiation" in stage or "feasibility" in stage:
         return "budget_optimizer"
     if "vibe" in stage:
         return "__end__"
     return "__end__"
+
+
+# ---------------------------------------------------------------------------
+# Conditional edge: after feasibility validator
+# ---------------------------------------------------------------------------
+
+_MAX_NEGOTIATION_RETRIES = 2
+
+
+def _route_after_feasibility(state: dict) -> str:
+    """
+    After feasibility_validator:
+    - If passed (or max retries reached): proceed to approval_gate.
+    - If failed: loop back to negotiator (non-linear loop).
+    """
+    passed = state.get("feasibility_passed", True)
+    if passed:
+        return "approval_gate"
+    # Count retries via negotiation_log entries starting with "Negotiator started"
+    log = state.get("negotiation_log") or []
+    retries = sum(1 for line in log if "Negotiator started" in line)
+    if retries >= _MAX_NEGOTIATION_RETRIES:
+        return "approval_gate"  # give up and proceed
+    return "negotiator"
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +203,10 @@ def build_travel_graph():
     builder.add_node("local_intel", gather_local_intel_node)
     builder.add_node("festival_check", check_festivals_node)
     builder.add_node("enrichment_aggregator", _enrichment_aggregator)
+
+    # Negotiator + Feasibility (between enrichment and optimization)
+    builder.add_node("negotiator", negotiate_bundles_node)
+    builder.add_node("feasibility_validator", feasibility_validator_node)
 
     # Optimization & generation pipeline (now includes response_validator)
     builder.add_node("approval_gate", approval_gate_node)
@@ -228,8 +261,23 @@ def build_travel_graph():
     builder.add_edge("local_intel", "enrichment_aggregator")
     builder.add_edge("festival_check", "enrichment_aggregator")
 
-    # Enrichment aggregator -> approval gate
-    builder.add_edge("enrichment_aggregator", "approval_gate")
+    # Enrichment aggregator -> negotiator (if enabled) or directly to approval_gate
+    def _route_after_enrichment(state: dict) -> str:
+        return "negotiator" if state.get("use_negotiator", True) else "approval_gate"
+
+    builder.add_conditional_edges("enrichment_aggregator", _route_after_enrichment, {
+        "negotiator": "negotiator",
+        "approval_gate": "approval_gate",
+    })
+
+    # Negotiator -> feasibility validator
+    builder.add_edge("negotiator", "feasibility_validator")
+
+    # Feasibility validator -> approval_gate (pass) or back to negotiator (fail, non-linear loop)
+    builder.add_conditional_edges("feasibility_validator", _route_after_feasibility, {
+        "approval_gate": "approval_gate",
+        "negotiator": "negotiator",
+    })
 
     # Approval gate routes
     builder.add_conditional_edges("approval_gate", _route_after_approval, {

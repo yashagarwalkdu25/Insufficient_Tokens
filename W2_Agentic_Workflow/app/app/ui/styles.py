@@ -82,6 +82,7 @@ div[data-testid="stTextArea"] textarea,
   font-weight: 600 !important;
   border-radius: 10px !important;
   transition: all 0.25s ease !important;
+  max-width: 320px !important;
 }
 [data-testid="stButton"] > button[kind="primary"],
 .stButton > button[kind="primary"],
@@ -194,7 +195,7 @@ button[data-testid="baseButton-primary"] {
 section[data-testid="stAppViewContainer"] > div:first-child,
 section.main .block-container {
   padding-top: 0 !important;
-  max-width: 860px !important;
+  max-width: 1200px !important;
   margin-left: auto !important;
   margin-right: auto !important;
   padding-left: 2rem !important;
@@ -850,7 +851,7 @@ LATE_OVERRIDES_CSS = """
 /* Buttons: primary = blue, rest = white with blue border */
 [data-testid="stButton"] > button[kind="primary"], .stButton > button[kind="primary"], button[data-testid="baseButton-primary"] { background: linear-gradient(135deg, #1E3A6E 0%, #2E55A0 100%) !important; border: none !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }
 .stApp [data-testid="stButton"] > button[kind="primary"] *, .stApp .stButton > button[kind="primary"] *, .stApp button[data-testid="baseButton-primary"] * { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }
-[data-testid="stButton"] > button, .stButton > button { background: #FFFFFF !important; border: 1.5px solid #DDD5EF !important; color: #1E3A6E !important; }
+[data-testid="stButton"] > button, .stButton > button { background: #FFFFFF !important; border: 1.5px solid #DDD5EF !important; color: #1E3A6E !important; max-width: 320px !important; }
 /* Download buttons: always light background */
 [data-testid="stDownloadButton"] > button,
 .stDownloadButton > button {
@@ -877,7 +878,7 @@ LATE_OVERRIDES_CSS = """
 [data-testid="stHeader"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapse"], header[data-testid="stHeader"] { display: none !important; }
 /* Remove top gap + constrain width */
 .stApp .block-container,
-.stApp [data-testid="stAppViewBlockContainer"] { padding-top:0!important; max-width:860px!important; margin-left:auto!important; margin-right:auto!important; padding-left:2rem!important; padding-right:2rem!important; }
+.stApp [data-testid="stAppViewBlockContainer"] { padding-top:0!important; max-width:1200px!important; margin-left:auto!important; margin-right:auto!important; padding-left:2rem!important; padding-right:2rem!important; }
 /* Hero logo text — always white regardless of theme cascade */
 .ts-hero h1, .stApp .ts-hero h1, div.ts-hero h1 { color:#FFFFFF!important; -webkit-text-fill-color:#FFFFFF!important; }
 </style>

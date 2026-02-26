@@ -152,6 +152,41 @@ def render_onboarding() -> str | None:
             key="onb_interests",
         )
 
+    # ── AI Travel Negotiator toggle ───────────────────────────────────
+    st.markdown("""
+<div style="
+  background: linear-gradient(135deg, #f0eaf8 0%, #e8eef8 100%);
+  border: 1.5px solid #c4aee8;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0 0.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+">
+  <div style="font-size:1.6rem;line-height:1;">🤝</div>
+  <div style="flex:1;">
+    <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem;">
+      <span style="font-weight:700;font-size:0.95rem;color:#3d1f6e;">AI Travel Negotiator</span>
+      <span style="background:#6b3fa0;color:#fff;font-size:0.62rem;font-weight:700;
+                   letter-spacing:0.07em;text-transform:uppercase;padding:0.1rem 0.45rem;
+                   border-radius:20px;">Beta</span>
+    </div>
+    <div style="font-size:0.82rem;color:#5a4a6e;line-height:1.5;">
+      Generates three negotiated bundles — Budget Saver, Best Value, Experience Max —
+      with cost breakdowns and trade-off analysis before building your itinerary.
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    use_negotiator = st.checkbox(
+        "Enable AI Travel Negotiator  ·  compare bundles before building itinerary",
+        value=st.session_state.get("onb_use_negotiator", True),
+        key="onb_use_negotiator",
+    )
+    st.session_state["use_negotiator"] = use_negotiator
+
     # ── Submit ────────────────────────────────────────────────────────
     st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
     if st.button("Plan My Journey", type="primary", use_container_width=True, key="onb_submit"):
