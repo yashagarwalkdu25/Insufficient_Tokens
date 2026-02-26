@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     PLACES_CACHE_TTL: int = Field(default=86400, description="Places cache TTL (24 hours)")
 
     # Database
-    DB_PATH: str = Field(default="yatra.db", description="SQLite database file path")
+    DB_PATH: str = Field(default="db/yatra.db", description="SQLite database file path")
 
     @property
     def has_openai(self) -> bool:

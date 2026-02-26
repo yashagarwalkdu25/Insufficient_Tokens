@@ -13,6 +13,20 @@ AI-powered travel planning across India with multi-agent workflows: flights, hot
 
 ## Quick start
 
+### Docker (recommended)
+
+```bash
+cd W2_Agentic_Workflow/app
+cp .env.example .env        # fill in your keys (at minimum OPENAI_API_KEY)
+docker compose up -d
+```
+
+**Access**: http://localhost:8501
+
+For AWS EC2 deployment, see [Deployment Guide](../docs/DEPLOYMENT.md).
+
+### Local
+
 ```bash
 cd W2_Agentic_Workflow/app
 python -m venv .venv
@@ -39,6 +53,10 @@ All keys are optional; the app degrades gracefully.
 
 See `.env.example` for links to get each key.
 
+## Agent flow
+
+![Agent Flow Diagram](../docs/Agent_Flow.png)
+
 ## Tech stack
 
 - **Orchestration**: LangGraph (sync)
@@ -46,6 +64,7 @@ See `.env.example` for links to get each key.
 - **UI**: Streamlit + custom CSS design system (Cormorant Garamond + Plus Jakarta Sans)
 - **DB**: SQLite (sessions, cache, decisions)
 - **Validation**: Pydantic v2
+- **Deployment**: Docker (multi-stage build)
 
 ## Project structure
 
@@ -60,4 +79,8 @@ app/
   prompts/      # supervisor, (intent_parser, budget_optimizer, etc.)
   ui/           # styles.py, components/ (onboarding, dashboard, itinerary, map, budget, tips, vibe, reasoning, chat, approval, share)
   export/       # PDF, JSON, HTML, QR, templates/
+Dockerfile
+docker-compose.yml
+.env.example
+requirements.txt
 ```

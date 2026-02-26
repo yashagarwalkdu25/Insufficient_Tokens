@@ -1,0 +1,31 @@
+services:
+  tripsaathi:
+    build: .
+    container_name: tripsaathi
+    ports:
+      - "8501:8501"
+    environment:
+      # LLM (required for AI planning)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Flights (optional)
+      - AMADEUS_CLIENT_ID=${AMADEUS_CLIENT_ID:-}
+      - AMADEUS_CLIENT_SECRET=${AMADEUS_CLIENT_SECRET:-}
+      # Hotels (optional)
+      - LITEAPI_KEY=${LITEAPI_KEY:-}
+      # Activities & directions (optional)
+      - GOOGLE_PLACES_KEY=${GOOGLE_PLACES_KEY:-}
+      - GOOGLE_DIRECTIONS_KEY=${GOOGLE_DIRECTIONS_KEY:-}
+      # Weather (optional)
+      - OPENWEATHERMAP_KEY=${OPENWEATHERMAP_KEY:-}
+      # Local tips (optional)
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
+    volumes:
+      - ./db:/app/db  # Persist SQLite session & cache data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
