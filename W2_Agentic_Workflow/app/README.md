@@ -23,7 +23,7 @@ docker compose up -d
 
 **Access**: http://localhost:8501
 
-For AWS EC2 deployment, see [Deployment Guide](docs/DEPLOYMENT.md).
+For AWS EC2 deployment, see [Deployment Guide](../docs/DEPLOYMENT.md).
 
 ### Local
 
@@ -55,7 +55,7 @@ See `.env.example` for links to get each key.
 
 ## Agent flow
 
-![Agent Flow Diagram](docs/Agent_Flow.png)
+![Agent Flow Diagram](../docs/Agent_Flow.png)
 
 ## Tech stack
 
