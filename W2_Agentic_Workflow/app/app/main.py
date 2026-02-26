@@ -157,9 +157,18 @@ elif st.session_state["current_screen"] == "planning":
             if trip_state.get("requires_approval") and not (has_bundles and not has_trip):
                 approval_type = trip_state.get("approval_type", "")
                 logger.info("Planning done → approval required | type=%s", approval_type)
-                st.session_state["show_approval"] = True
-                st.session_state["current_screen"] = "dashboard"
-                st.rerun()
+                if approval_type == "itinerary":
+                    # Show the dashboard first — user clicks "Approve & Export" to reach the review card
+                    logger.info("Itinerary approval → dashboard first")
+                    st.session_state["current_screen"] = "dashboard"
+                    st.balloons()
+                    import time as _t; _t.sleep(1.5)
+                    st.rerun()
+                else:
+                    # Destination / research approval — go straight to the approval card
+                    st.session_state["show_approval"] = True
+                    st.session_state["current_screen"] = "dashboard"
+                    st.rerun()
             elif has_trip:
                 logger.info("Planning done → dashboard (trip ready)")
                 st.session_state["current_screen"] = "dashboard"
@@ -219,11 +228,6 @@ elif st.session_state.get("show_approval"):
         st.session_state["chat_messages"] = []
         st.rerun()
 
-    # For itinerary approval: show full dashboard (details) first, then review card + actions
-    if approval_type == "itinerary" and state.get("trip"):
-        from app.ui.components.trip_dashboard import render_trip_dashboard
-        render_trip_dashboard(state)
-        st.markdown('<div class="ts-separator"></div>', unsafe_allow_html=True)
     render_approval(state, on_approve, on_modify, on_reset)
 
 else:

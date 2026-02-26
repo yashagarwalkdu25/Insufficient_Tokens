@@ -560,13 +560,25 @@ div.ts-hero h1 {
 }
 /* Compact chat input in sidebar */
 [data-testid="stSidebar"] [data-testid="stChatInput"],
+[data-testid="stSidebar"] [data-testid="stChatInput"] > div,
+[data-testid="stSidebar"] [data-testid="stChatInput"] > div > div {
+  background: #FFFFFF !important;
+  border-radius: 12px !important;
+  max-height: 80px !important;
+}
 [data-testid="stSidebar"] [data-testid="stChatInput"] textarea {
+  background: #FFFFFF !important;
+  color: #1A1D3A !important;
+  -webkit-text-fill-color: #1A1D3A !important;
+  caret-color: #1E3A6E !important;
   max-height: 80px !important;
   min-height: 44px !important;
   font-size: 0.88rem !important;
+  border-radius: 12px !important;
 }
-[data-testid="stSidebar"] [data-testid="stChatInput"] > div {
-  max-height: 80px !important;
+[data-testid="stSidebar"] [data-testid="stChatInput"] button {
+  background: transparent !important;
+  color: #1E3A6E !important;
 }
 
 /* ─── Expander (itinerary day cards & AI Reasoning) ───────── */
@@ -872,8 +884,12 @@ LATE_OVERRIDES_CSS = """
 [data-testid="stExpander"] summary::after { content:'›'; position:absolute; right:1rem; top:50%; transform:translateY(-50%) rotate(90deg); font-size:1.2rem; font-weight:700; color:#1E3A6E; transition:transform 0.2s ease; pointer-events:none; }
 [data-testid="stExpander"] details[open] summary::after { transform:translateY(-50%) rotate(270deg); }
 [data-testid="stExpander"] [data-testid="stExpanderDetails"], [data-testid="stExpander"] [data-testid="stExpanderDetails"] *, [data-testid="stExpander"] details > div, [data-testid="stExpander"] details > div * { color:#1A1D3A!important; -webkit-text-fill-color:#1A1D3A!important; }
-/* Hide Material Symbol icon text (font-load fallback only) */
-[style*="Material Symbols Rounded"], [style*="Material Symbols Outlined"], [style*="material-symbols-rounded"], [style*="material-symbols-outlined"], .material-symbols-rounded, .material-symbols-outlined, .material-symbols, [data-testid="stExpanderToggleIcon"] { display:none!important; font-size:0!important; width:0!important; height:0!important; overflow:hidden!important; visibility:hidden!important; }
+/* Hide Material Symbol icon text (font-load fallback only) — scope tightly to avoid hiding emojis */
+[data-testid="stIconMaterial"], [data-testid="stExpanderToggleIcon"] { display:none!important; font-size:0!important; width:0!important; height:0!important; overflow:hidden!important; visibility:hidden!important; }
+/* Chat input: always white background */
+[data-testid="stChatInput"], [data-testid="stChatInput"] > div, [data-testid="stChatInput"] > div > div { background:#FFFFFF!important; border-radius:12px!important; }
+[data-testid="stChatInput"] textarea { background:#FFFFFF!important; color:#1A1D3A!important; -webkit-text-fill-color:#1A1D3A!important; caret-color:#1E3A6E!important; }
+[data-testid="stChatInput"] button { background:transparent!important; }
 /* Hide Streamlit chrome */
 [data-testid="stHeader"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"], [data-testid="stSidebarCollapse"], header[data-testid="stHeader"] { display: none !important; }
 /* Remove top gap + constrain width */
