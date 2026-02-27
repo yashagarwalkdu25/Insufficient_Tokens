@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import time
 from datetime import date, timedelta
@@ -50,31 +51,36 @@ def _nominatim_geocode(place: str, city: str) -> tuple[float, float] | None:
 
 def _fill_missing_coords(days: list[DayPlan], dest: str) -> None:
     """Geocode items that have no coordinates. Uses Nominatim for specific places,
-    falls back to city base coords with small per-item offsets so markers don't stack."""
+    falls back to city base coords with small random offsets so markers don't stack."""
     city_data = get_city(dest)
     base_lat = float(city_data["latitude"]) if city_data and city_data.get("latitude") else None
     base_lon = float(city_data["longitude"]) if city_data and city_data.get("longitude") else None
 
-    offset_step = 0.003
-    offset_idx = 0
+    _SKIP_GEOCODE_TYPES = {"transport", "free_time", "meal"}
+    _GENERIC_TITLES = {"free time", "leisure", "rest", "check-in", "check-out", "breakfast", "lunch", "dinner"}
+
+    rng = random.Random(42)  # deterministic seed so reruns are stable
 
     for day in days:
         for item in day.items:
             if item.latitude is not None and item.longitude is not None:
                 continue
-            # Skip transport/hotel items — they rarely have specific geocodable names
-            if item.item_type in ("transport",):
-                continue
-            # Try Nominatim for the specific place
-            coords = _nominatim_geocode(item.title, dest)
-            if coords:
-                item.latitude, item.longitude = coords
-                logger.debug("Geocoded '%s' -> %s", item.title, coords)
-            elif base_lat is not None and base_lon is not None:
-                # Spread items around city center so they're individually visible
-                item.latitude = base_lat + (offset_idx % 7 - 3) * offset_step
-                item.longitude = base_lon + (offset_idx // 7 % 7 - 3) * offset_step
-                offset_idx += 1
+            # Skip Nominatim for generic/non-place items — geocoding "Free Time" returns
+            # random places worldwide; use city-center offset instead.
+            is_generic = (
+                item.item_type in _SKIP_GEOCODE_TYPES
+                or (item.title or "").strip().lower() in _GENERIC_TITLES
+            )
+            if not is_generic:
+                coords = _nominatim_geocode(item.title, dest)
+                if coords:
+                    item.latitude, item.longitude = coords
+                    logger.debug("Geocoded '%s' -> %s", item.title, coords)
+                    continue
+            if base_lat is not None and base_lon is not None:
+                # Random scatter within ~1.5 km radius so markers don't overlap or form lines
+                item.latitude = base_lat + rng.uniform(-0.008, 0.008)
+                item.longitude = base_lon + rng.uniform(-0.008, 0.008)
 
 
 def _build_activity_lines(selected_activities: list) -> list[str]:
@@ -266,6 +272,8 @@ RULES:
 6. Include 1 free-time slot per day.
 7. Respect opening hours if provided.
 8. Each item needs: time (HH:MM), end_time, title, description, item_type, travel_mode (for transport items), cost (INR).
+9. CRITICAL: No time gap between consecutive items should exceed 2 hours without an activity filling it. A full day runs 07:00–22:00 — fill it with activities, meals, and free time. Do NOT jump from 07:00 to 11:00 or 11:00 to 19:00 without items in between.
+10. travel_duration_to_next is the TRANSIT TIME (in minutes) to physically travel from this item's location to the next item's location (e.g. 15 min cab ride). It is NOT the gap between scheduled times. Keep values realistic: walking 5-20 min, cab/auto 10-45 min, bus/train 30-180 min.
 
 TRANSPORT RULES (CRITICAL):
 - Use ONLY the booked transport mode: "{transport_mode}" for the main {origin}→{dest} journey.
@@ -283,6 +291,12 @@ CRITICAL REQUIREMENTS:
 - Typical Indian meal costs: street food ₹50-150, casual restaurant ₹200-500, mid-range ₹500-1000.
 - Entry fees: major monuments ₹50-750 (Indian citizens), museums ₹20-200.
 
+COORDINATES REQUIREMENT:
+- For every item that is a real named place (activity, restaurant, hotel, monument, market), provide its actual GPS coordinates as "latitude" and "longitude".
+- Use your knowledge of {dest}'s geography — spread markers across the city realistically.
+- For transport items (bus/train journeys between cities), omit coordinates.
+- For generic items (Free Time, Rest), omit coordinates.
+
 Return JSON array of day objects:
 [
   {{
@@ -290,7 +304,8 @@ Return JSON array of day objects:
     "title": "Arrival & First Impressions",
     "tip_of_the_day": "optional local tip",
     "items": [
-      {{"time": "07:00", "end_time": "09:30", "title": "Train from {origin} to {dest}", "description": "...", "item_type": "transport", "travel_mode": "{transport_mode}", "cost": {transport_cost}, "activity_index": null, "travel_duration_to_next": 20, "travel_mode_to_next": "cab"}}
+      {{"time": "07:00", "end_time": "09:30", "title": "Train from {origin} to {dest}", "description": "...", "item_type": "transport", "travel_mode": "{transport_mode}", "cost": {transport_cost}, "activity_index": null, "travel_duration_to_next": 20, "travel_mode_to_next": "cab", "latitude": null, "longitude": null}},
+      {{"time": "10:00", "end_time": "12:00", "title": "Laxman Jhula", "description": "Iconic suspension bridge over the Ganges.", "item_type": "activity", "cost": 0, "activity_index": null, "travel_duration_to_next": 15, "travel_mode_to_next": "walk", "latitude": 30.1271, "longitude": 78.3217}}
     ]
   }}
 ]

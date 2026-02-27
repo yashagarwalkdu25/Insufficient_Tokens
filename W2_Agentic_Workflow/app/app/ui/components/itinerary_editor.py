@@ -111,9 +111,11 @@ def render_itinerary(trip: dict[str, Any], state: dict[str, Any]) -> None:
                 dur = item.get("travel_duration_to_next")
                 mode = item.get("travel_mode_to_next") or "drive"
                 if dur is not None and dur > 0 and idx < len(items) - 1:
-                    mode_icon = {"driving": "🚗", "walking": "🚶", "transit": "🚌"}.get(mode, "🚗")
+                    mode_icon = {"driving": "🚗", "walking": "🚶", "transit": "🚌", "cab": "🚕", "auto": "🛺", "metro": "🚇", "walk": "🚶"}.get(mode, "🚗")
+                    mode_label = {"driving": "drive", "walking": "walk", "transit": "transit", "cab": "cab", "auto": "auto", "metro": "metro", "walk": "walk"}.get(mode, "travel")
+                    dur_label = f"{dur} min" if dur < 60 else f"{dur // 60}h {dur % 60}min" if dur % 60 else f"{dur // 60}h"
                     st.markdown(
-                        f'<div class="ts-travel-badge">{mode_icon} {dur} min to next stop</div>',
+                        f'<div class="ts-travel-badge">{mode_icon} {dur_label} {mode_label} to next</div>',
                         unsafe_allow_html=True,
                     )
 

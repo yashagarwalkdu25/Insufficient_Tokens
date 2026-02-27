@@ -205,4 +205,4 @@ def render_map(trip: dict[str, Any]) -> None:
             unsafe_allow_html=True,
         )
 
-    st_folium(m, width=700, height=500, returned_objects=[])
+    st_folium(m, use_container_width=True, height=500, returned_objects=[])

@@ -252,6 +252,26 @@ class TavilySearchClient:
 
         return tips
 
+    def search_hidden_gems(self, destination: str, interests: list[str] | None = None) -> list[dict]:
+        """Search for hidden gems and lesser-known spots via Tavily."""
+        interest_str = ", ".join(interests[:3]) if interests else "nature, culture, food"
+        query = (
+            f"hidden gems lesser known places {destination} India off beaten path "
+            f"secret spots locals recommend {interest_str} underrated"
+        )
+        result = self.search(query, max_results=6, search_depth="advanced")
+        if not result:
+            return []
+        return [
+            {
+                "title": r.get("title", "Hidden Gem"),
+                "content": r.get("content", "")[:400],
+                "url": r.get("url", ""),
+                "source": "tavily_web",
+            }
+            for r in result.get("results", [])
+        ]
+
     def search_festivals(self, destination: str, start_date: str, end_date: str) -> list[dict]:
         """Search for festivals and events via Tavily."""
         query = f"festivals events celebrations in {destination} India between {start_date} and {end_date}"

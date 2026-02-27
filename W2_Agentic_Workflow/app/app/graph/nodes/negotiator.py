@@ -213,7 +213,9 @@ def _normalise_activity(opt: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(opt)
     out.setdefault("rating", 3.5)
     out.setdefault("duration_hours", 2.0)
-    out.setdefault("price", 0)
+    # Keep None as None (unknown price) — don't default to 0 which implies "Free"
+    if "price" not in out:
+        out["price"] = 0
     if "id" not in out:
         out["id"] = _stable_id(out.get("name") or str(out.get("price")))
     return out

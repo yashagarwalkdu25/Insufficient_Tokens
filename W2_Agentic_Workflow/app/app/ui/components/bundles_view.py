@@ -497,7 +497,8 @@ def _render_bundle_cards_grid(
                 if activities:
                     st.markdown("**All Activities**")
                     for a in activities:
-                        price_str = f"₹{a.get('price', 0):,.0f}" if a.get("price") else "Free"
+                        _price = a.get("price")
+                        price_str = "Free" if _price is None else (f"₹{_price:,.0f}" if _price > 0 else "Free")
                         st.markdown(
                             f"- {a.get('name', '?')} "
                             f"({a.get('category', '?')}, {a.get('duration_hours', '?')}h)"

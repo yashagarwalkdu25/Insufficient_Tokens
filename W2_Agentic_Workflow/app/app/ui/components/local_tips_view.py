@@ -36,19 +36,37 @@ def render_local_tips(
     st.markdown("### Hidden Gems")
     if not gems:
         st.caption("No hidden gems discovered yet.")
+    _CAT_ICONS = {
+        "nature": "🌿", "food": "🍜", "culture": "🎭", "adventure": "🧗",
+        "heritage": "🏛️", "spiritual": "🕌", "market": "🛍️", "viewpoint": "🔭",
+    }
     for g in gems[:8]:
         name     = g.get("name") or ""
-        why      = g.get("why_special") or g.get("description") or ""
+        desc     = g.get("description") or ""
+        why      = g.get("why_special") or ""
         pro      = g.get("pro_tip") or ""
+        cat      = (g.get("category") or "culture").lower()
         conf     = g.get("confidence", 1)
         conf_pct = int(conf * 100) if isinstance(conf, float) and conf <= 1 else int(conf)
+        icon     = _CAT_ICONS.get(cat, "💎")
+        cat_label = cat.capitalize()
         st.markdown(
-            f'<div class="ts-tip-card ts-gem-card">'
-            f'<strong>{name}</strong>'
-            + (f'<br/><span style="font-size:0.82rem; color:var(--ts-text-muted);">{why}</span>' if why else '')
-            + (f'<br/><em style="font-size:0.82rem; color:var(--ts-gold);">Pro tip: {pro}</em>' if pro else '')
-            + f'<br/><div style="background:var(--ts-border); border-radius:10px; height:6px; margin-top:6px;">'
+            f'<div class="ts-tip-card ts-gem-card" style="border-left:3px solid var(--ts-gold); padding-left:14px;">'
+            f'<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">'
+            f'<span style="font-size:1.2rem;">{icon}</span>'
+            f'<strong style="font-size:1rem;">{name}</strong>'
+            f'<span class="ts-pill" style="font-size:0.7rem; padding:2px 8px; margin-left:auto;">{cat_label}</span>'
+            f'</div>'
+            + (f'<span style="font-size:0.85rem; color:var(--ts-text-muted); display:block; margin-bottom:4px;">{desc}</span>' if desc else '')
+            + (f'<span style="font-size:0.82rem; color:var(--ts-text-secondary); display:block; margin-bottom:6px;">✨ {why}</span>' if why else '')
+            + (f'<div style="background:rgba(255,193,7,0.12); border-radius:6px; padding:6px 10px; margin-bottom:6px;">'
+               f'<em style="font-size:0.82rem; color:var(--ts-gold);">💡 Pro tip: {pro}</em></div>' if pro else '')
+            + f'<div style="display:flex; align-items:center; gap:8px; margin-top:4px;">'
+            f'<span style="font-size:0.72rem; color:var(--ts-text-muted);">Confidence</span>'
+            f'<div style="flex:1; background:var(--ts-border); border-radius:10px; height:5px;">'
             f'<div style="background:var(--ts-gold); width:{conf_pct}%; height:100%; border-radius:10px;"></div></div>'
+            f'<span style="font-size:0.72rem; color:var(--ts-text-muted);">{conf_pct}%</span>'
+            f'</div>'
             + '</div>',
             unsafe_allow_html=True,
         )

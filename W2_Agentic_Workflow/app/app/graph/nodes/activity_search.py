@@ -87,6 +87,60 @@ def _geocode_city(city_name: str) -> tuple[float | None, float | None]:
     return None, None
 
 
+def _enrich_activity_prices(activities: list[dict], dest: str) -> list[dict]:
+    """Use GPT-4o-mini to estimate realistic INR prices and categories for a list of activities."""
+    settings = get_settings()
+    if not settings.has_openai or not activities:
+        # Fallback: assign category-based defaults without LLM
+        for a in activities:
+            if a.get("price") is None:
+                a["price"] = 0
+        return activities
+
+    try:
+        llm = OpenAI(api_key=settings.OPENAI_API_KEY)
+        names_list = "\n".join(
+            f"{i}. {a['name']} — {(a.get('description') or '')[:80]}"
+            for i, a in enumerate(activities)
+        )
+        prompt = (
+            f"You are a travel pricing expert for {dest}, India.\n"
+            f"For each activity below, provide a realistic INR price (entry fee / booking cost per person) "
+            f"and the best category from: adventure, culture, nature, food, wellness, spiritual, shopping, sightseeing.\n"
+            f"Use 0 only if the activity is genuinely free (e.g. a public park, temple with no entry fee).\n"
+            f"For paid experiences like Bungee Jumping, Rafting, Paragliding, Yoga classes, Food tours — "
+            f"use realistic market rates in INR.\n\n"
+            f"Activities:\n{names_list}\n\n"
+            f"Return ONLY a JSON array with one object per activity in order:\n"
+            f'[{{"price": 1500, "category": "adventure", "duration_hours": 2.0}}, ...]\n'
+            f"No markdown, no extra text."
+        )
+        resp = llm.chat.completions.create(
+            model=settings.GPT4O_MINI_MODEL,
+            temperature=0.2,
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+        enrichments = json.loads(raw)
+        for i, enrichment in enumerate(enrichments):
+            if i < len(activities):
+                activities[i]["price"] = int(enrichment.get("price") or 0)
+                activities[i]["category"] = enrichment.get("category") or activities[i].get("category") or "general"
+                activities[i]["duration_hours"] = float(enrichment.get("duration_hours") or activities[i].get("duration_hours") or 2.0)
+        logger.info("Enriched prices for %d Tavily activities in %s", len(activities), dest)
+    except Exception as e:
+        logger.warning("Activity price enrichment failed: %s", e)
+        for a in activities:
+            if a.get("price") is None:
+                a["price"] = 0
+    return activities
+
+
 def search_activities_node(state: dict[str, Any]) -> dict[str, Any]:
     """LangGraph node: search activities via Google Places then Tavily. Returns partial state update."""
     start = time.time()
@@ -135,18 +189,23 @@ def search_activities_node(state: dict[str, Any]) -> dict[str, Any]:
             if tavily.available:
                 tavily_acts = tavily.search_activities(dest, interests)
                 if tavily_acts:
-                    for ta in tavily_acts:
-                        out.append({
+                    raw_tavily = [
+                        {
                             "name": ta.get("name", "Activity"),
-                            "description": ta.get("description"),
+                            "description": ta.get("description") or "",
                             "category": "general",
                             "duration_hours": 2.0,
-                            "price": 0,
+                            "price": None,  # unknown — will be enriched below
                             "currency": "INR",
                             "url": ta.get("url"),
                             "source": "tavily_web",
                             "verified": False,
-                        })
+                        }
+                        for ta in tavily_acts
+                    ]
+                    # Enrich prices via LLM
+                    enriched = _enrich_activity_prices(raw_tavily, dest)
+                    out.extend(enriched)
                     reasoning_parts.append(
                         f"Tavily web search found {len(tavily_acts)} activity results for {dest}."
                     )
