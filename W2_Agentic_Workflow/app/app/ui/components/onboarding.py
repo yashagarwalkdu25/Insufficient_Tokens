@@ -1,8 +1,10 @@
 """Onboarding: single-input trip intake."""
 from __future__ import annotations
 
-import streamlit as st
+import re
 from datetime import date, timedelta
+
+import streamlit as st
 
 
 EXAMPLES = [
@@ -191,22 +193,64 @@ def render_onboarding() -> str | None:
     st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
     if st.button("Plan My Journey", type="primary", use_container_width=True, key="onb_submit"):
         if free_text and free_text.strip():
-            extra = _build_extra_context()
+            extra = _build_extra_context(free_text.strip())
             return (free_text.strip() + ("  " + extra if extra else "")).strip()
         st.error("Describe your trip above, or try one of the examples.")
         return None
     return None
 
 
-def _build_extra_context() -> str:
-    """Assemble structured detail fields into a context string appended to free text."""
+def _parse_budget_from_text(text: str) -> int | None:
+    """Extract budget (INR) from free text. Returns None if none found. Prefer last mention (user's edit)."""
+    if not (text or text.strip()):
+        return None
+    # Match ₹X, ₹X,XXX, ₹Xk, Xk, X lakh, budget X, under ₹X, under X
+    candidates: list[int] = []
+    # ₹25,000 or ₹25k or ₹1,00,000
+    for m in re.finditer(r"₹\s*([\d,]+)\s*(?:k|lakh|lac)?", text, re.IGNORECASE):
+        raw = m.group(1).replace(",", "")
+        try:
+            n = int(raw)
+            if "lakh" in text[m.start() : m.end()].lower() or "lac" in text[m.start() : m.end()].lower():
+                n *= 100000
+            elif "k" in text[m.start() : m.end()].lower():
+                n = n * 1000 if n < 1000 else n
+            if 100 <= n <= 1000000:
+                candidates.append(n)
+        except ValueError:
+            pass
+    # 15k, 20k, 60K (standalone)
+    for m in re.finditer(r"\b(\d+)\s*k\b", text, re.IGNORECASE):
+        try:
+            n = int(m.group(1))
+            n = n * 1000 if n < 1000 else n
+            if 1000 <= n <= 1000000:
+                candidates.append(n)
+        except ValueError:
+            pass
+    # "budget 25000" or "under 20000"
+    for m in re.finditer(r"(?:budget|under)\s*[₹]?\s*([\d,]+)", text, re.IGNORECASE):
+        try:
+            n = int(m.group(1).replace(",", ""))
+            if 100 <= n <= 1000000:
+                candidates.append(n)
+        except ValueError:
+            pass
+    return candidates[-1] if candidates else None
+
+
+def _build_extra_context(free_text: str = "") -> str:
     parts: list[str] = []
 
     origin = (st.session_state.get("onb_origin") or "").strip()
     if origin and origin.lower() != "delhi":
         parts.append(f"from {origin}")
 
-    budget: int = st.session_state.get("onb_budget", 15000)
+    # Use budget from free text if user edited it (e.g. quick-click then "₹25,000"); else use expander slider
+    budget: int = _parse_budget_from_text(free_text) if free_text else None
+    if budget is None:
+        budget = st.session_state.get("onb_budget", 15000)
+    # Do not write to onb_budget/onb_budget_text here — widget already instantiated this run
     parts.append(f"budget ₹{budget:,}")
 
     start = st.session_state.get("onb_start")
