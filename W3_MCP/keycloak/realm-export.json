@@ -1,0 +1,469 @@
+{
+  "id": "finint",
+  "realm": "finint",
+  "enabled": true,
+  "sslRequired": "none",
+  "defaultSignatureAlgorithm": "RS256",
+  "registrationAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+
+  "roles": {
+    "realm": [
+      { "name": "free",    "description": "Free-tier access" },
+      { "name": "premium", "description": "Premium-tier access" },
+      { "name": "analyst", "description": "Analyst-tier access" },
+      { "name": "admin",   "description": "Admin access" }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "finint-mcp",
+      "name": "FinInt MCP Server",
+      "description": "Public PKCE client for MCP host applications (Claude Desktop, VS Code, etc.)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "",
+      "baseUrl": "",
+      "redirectUris": [
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "https://localhost:*"
+      ],
+      "webOrigins": ["*"],
+      "defaultClientScopes": [
+        "openid",
+        "email",
+        "profile",
+        "market:read",
+        "mf:read",
+        "news:read",
+        "watchlist:read",
+        "watchlist:write"
+      ],
+      "optionalClientScopes": [
+        "fundamentals:read",
+        "technicals:read",
+        "filings:read",
+        "filings:deep",
+        "macro:read",
+        "macro:historical",
+        "research:generate",
+        "portfolio:read",
+        "portfolio:write"
+      ],
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tier-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "tier",
+            "claim.value": "",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "finint-mcp",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "finint-dashboard",
+      "name": "FinInt Dashboard",
+      "description": "Public PKCE client for the Next.js analytics dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "http://localhost:10005",
+      "baseUrl": "/",
+      "redirectUris": [
+        "http://localhost:10005/*",
+        "http://localhost:10005",
+        "http://localhost:3000/*",
+        "http://localhost:3000"
+      ],
+      "webOrigins": [
+        "http://localhost:10005",
+        "http://localhost:3000"
+      ],
+      "defaultClientScopes": [
+        "openid",
+        "email",
+        "profile",
+        "market:read",
+        "mf:read",
+        "news:read",
+        "watchlist:read",
+        "watchlist:write"
+      ],
+      "optionalClientScopes": [
+        "fundamentals:read",
+        "technicals:read",
+        "filings:read",
+        "filings:deep",
+        "macro:read",
+        "macro:historical",
+        "research:generate",
+        "portfolio:read",
+        "portfolio:write"
+      ],
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "finint-dashboard",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "full_name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-full-name-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "preferred_username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+
+  "clientScopes": [
+    {
+      "name": "openid",
+      "description": "OpenID Connect scope",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "email",
+      "description": "Email scope",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "profile",
+      "description": "Profile scope",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "market:read",
+      "description": "Read market data (quotes, indices, gainers/losers)",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fundamentals:read",
+      "description": "Read fundamental data (financials, ratios, shareholding)",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "technicals:read",
+      "description": "Read technical indicators",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "mf:read",
+      "description": "Read mutual fund data (search, NAV, comparison)",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "news:read",
+      "description": "Read news and sentiment data",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "filings:read",
+      "description": "Read corporate filings list",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "filings:deep",
+      "description": "Deep filing analysis and document parsing",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "macro:read",
+      "description": "Read macroeconomic data (RBI rates, inflation)",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "macro:historical",
+      "description": "Access historical macroeconomic data series",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "research:generate",
+      "description": "Generate cross-source research briefs and analysis",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "watchlist:read",
+      "description": "Read portfolio/watchlist",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "watchlist:write",
+      "description": "Modify portfolio/watchlist",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "portfolio:read",
+      "description": "Read portfolio analytics (health check, risk, overlap)",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "portfolio:write",
+      "description": "Write portfolio configuration",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    }
+  ],
+
+  "users": [
+    {
+      "username": "free_user",
+      "enabled": true,
+      "email": "free@finint.dev",
+      "emailVerified": true,
+      "firstName": "Free",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "free123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["free"]
+    },
+    {
+      "username": "premium_user",
+      "enabled": true,
+      "email": "premium@finint.dev",
+      "emailVerified": true,
+      "firstName": "Premium",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "premium123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["premium"]
+    },
+    {
+      "username": "analyst_user",
+      "enabled": true,
+      "email": "analyst@finint.dev",
+      "emailVerified": true,
+      "firstName": "Analyst",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["analyst"]
+    },
+    {
+      "username": "admin_user",
+      "enabled": true,
+      "email": "admin@finint.dev",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin", "analyst"]
+    }
+  ],
+
+  "scopeMappings": [
+    {
+      "clientScope": "market:read",
+      "roles": ["free", "premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "mf:read",
+      "roles": ["free", "premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "news:read",
+      "roles": ["free", "premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "watchlist:read",
+      "roles": ["free", "premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "watchlist:write",
+      "roles": ["free", "premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "fundamentals:read",
+      "roles": ["premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "technicals:read",
+      "roles": ["premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "macro:read",
+      "roles": ["premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "portfolio:read",
+      "roles": ["premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "portfolio:write",
+      "roles": ["premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "filings:read",
+      "roles": ["premium", "analyst", "admin"]
+    },
+    {
+      "clientScope": "filings:deep",
+      "roles": ["analyst", "admin"]
+    },
+    {
+      "clientScope": "macro:historical",
+      "roles": ["analyst", "admin"]
+    },
+    {
+      "clientScope": "research:generate",
+      "roles": ["analyst", "admin"]
+    }
+  ],
+
+  "components": {
+    "org.keycloak.keys.KeyProvider": [
+      {
+        "name": "rsa-generated",
+        "providerId": "rsa-generated",
+        "config": {
+          "priority": ["100"],
+          "algorithm": ["RS256"],
+          "keySize": ["2048"]
+        }
+      }
+    ]
+  }
+}

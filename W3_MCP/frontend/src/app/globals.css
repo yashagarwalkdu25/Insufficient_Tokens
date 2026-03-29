@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@layer base {
+  * {
+    @apply border-surface-3;
+  }
+
+  body {
+    @apply bg-surface-0 text-ink-primary font-sans antialiased;
+  }
+
+  ::selection {
+    @apply bg-accent-gold/20 text-accent-gold-bright;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-1;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-4 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-tertiary;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-surface-1/80 backdrop-blur-xl border border-surface-3/60 rounded-2xl;
+  }
+
+  .glass-panel-hover {
+    @apply glass-panel transition-all duration-300
+      hover:border-accent-gold/20 hover:shadow-card-hover;
+  }
+
+  .text-gradient-gold {
+    @apply bg-gradient-to-r from-accent-gold via-accent-gold-bright to-accent-gold
+      bg-clip-text text-transparent;
+  }
+
+  .text-gradient-cyan {
+    @apply bg-gradient-to-r from-accent-cyan via-cyan-300 to-accent-cyan
+      bg-clip-text text-transparent;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2
+      px-5 py-2.5 rounded-xl
+      bg-accent-gold text-surface-0 font-semibold text-sm
+      transition-all duration-200
+      hover:bg-accent-gold-bright hover:shadow-glow
+      active:scale-[0.97]
+      disabled:opacity-40 disabled:pointer-events-none;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2
+      px-4 py-2 rounded-xl
+      text-ink-secondary font-medium text-sm
+      transition-all duration-200
+      hover:bg-surface-3 hover:text-ink-primary
+      active:scale-[0.97];
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2
+      px-4 py-2 rounded-xl
+      border border-surface-4 text-ink-secondary font-medium text-sm
+      transition-all duration-200
+      hover:border-accent-gold/40 hover:text-accent-gold
+      active:scale-[0.97];
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 rounded-xl
+      bg-surface-2 border border-surface-3
+      text-ink-primary placeholder:text-ink-ghost
+      font-sans text-sm
+      outline-none transition-all duration-200
+      focus:border-accent-gold/50 focus:ring-1 focus:ring-accent-gold/20;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1
+      px-2.5 py-0.5 rounded-full
+      text-xs font-semibold tracking-wide uppercase;
+  }
+
+  .badge-free {
+    @apply badge bg-tier-free/10 text-tier-free border border-tier-free/20;
+  }
+
+  .badge-premium {
+    @apply badge bg-tier-premium/10 text-tier-premium border border-tier-premium/20;
+  }
+
+  .badge-analyst {
+    @apply badge bg-tier-analyst/10 text-tier-analyst border border-tier-analyst/20;
+  }
+
+  .badge-admin {
+    @apply badge bg-tier-admin/10 text-tier-admin border border-tier-admin/20;
+  }
+
+  .skeleton {
+    @apply bg-gradient-to-r from-surface-2 via-surface-3 to-surface-2
+      bg-[length:200%_100%] animate-shimmer rounded-xl;
+  }
+
+  .stat-value {
+    @apply font-mono text-2xl font-semibold tracking-tight;
+  }
+
+  .stat-label {
+    @apply text-xs font-medium text-ink-tertiary uppercase tracking-wider;
+  }
+
+  .divider {
+    @apply h-px bg-gradient-to-r from-transparent via-surface-4 to-transparent;
+  }
+
+  .noise-overlay {
+    @apply pointer-events-none fixed inset-0 z-50 opacity-[0.015];
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+  }
+}
+
+@layer utilities {
+  .delay-100 { animation-delay: 100ms; }
+  .delay-200 { animation-delay: 200ms; }
+  .delay-300 { animation-delay: 300ms; }
+  .delay-400 { animation-delay: 400ms; }
+  .delay-500 { animation-delay: 500ms; }
+  .delay-600 { animation-delay: 600ms; }
+  .delay-700 { animation-delay: 700ms; }
+  .delay-800 { animation-delay: 800ms; }
+}
