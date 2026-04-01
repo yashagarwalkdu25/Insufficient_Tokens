@@ -11,6 +11,7 @@ from typing import AsyncIterator
 
 import structlog
 from fastmcp import FastMCP
+from fastmcp.server.middleware import AuthMiddleware as MCPAuthMiddleware
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -20,7 +21,8 @@ from .config.settings import settings
 from .config.constants import ALL_SCOPES, TIER_SCOPES, TIER_FREE, TIER_PREMIUM, TIER_ANALYST
 from .tracing import init_tracing
 from .auth.provider import KeycloakAuthProvider
-from .auth.middleware import TierToolFilter, TOOL_SCOPE_MAP
+from .auth.middleware import TierToolFilter, TOOL_SCOPE_MAP, tool_scope_specs
+from .auth.mcp_keycloak import KeycloakMCPVerifier, finint_component_auth
 from .auth.rate_limiter import RateLimiter
 from .auth.audit import AuditLogger
 
@@ -75,6 +77,8 @@ mcp = FastMCP(
         "portfolio risk monitoring, and earnings intelligence. "
         "Tools are tiered: Free, Premium, and Analyst access levels."
     ),
+    auth=KeycloakMCPVerifier(),
+    middleware=[MCPAuthMiddleware(auth=finint_component_auth)],
 )
 
 
@@ -110,6 +114,8 @@ async def tool_catalog(request: Request) -> JSONResponse:
     free_scopes = set(TIER_SCOPES[TIER_FREE])
     premium_scopes = set(TIER_SCOPES[TIER_PREMIUM])
 
+    tier_rank = {"free": 0, "premium": 1, "analyst": 2}
+
     def _min_tier(scope: str) -> str:
         if scope in free_scopes:
             return "free"
@@ -117,14 +123,21 @@ async def tool_catalog(request: Request) -> JSONResponse:
             return "premium"
         return "analyst"
 
+    def _min_tier_for_spec(spec: str | tuple[str, ...]) -> str:
+        if isinstance(spec, str):
+            return _min_tier(spec)
+        tiers = [_min_tier(s) for s in spec]
+        return max(tiers, key=lambda t: tier_rank[t])
+
     tools = []
-    for tool_name, scope in sorted(TOOL_SCOPE_MAP.items()):
+    for tool_name, spec in sorted(TOOL_SCOPE_MAP.items()):
+        scopes_req = list(tool_scope_specs(tool_name))
         tools.append({
             "name": tool_name,
             "endpoint": f"/api/tool/{tool_name}",
             "method": "POST",
-            "required_scope": scope,
-            "minimum_tier": _min_tier(scope),
+            "required_scopes": scopes_req,
+            "minimum_tier": _min_tier_for_spec(spec),
             "auth": "Bearer JWT (OAuth 2.1 + PKCE via Keycloak)",
         })
 
@@ -262,20 +275,23 @@ async def rest_tool_bridge(request: Request) -> JSONResponse:
     """
     tool_name = request.path_params.get("tool_name", "")
 
+    _rm = settings.oauth_resource_metadata_url
+    _www_challenge = f'Bearer realm="finint", resource_metadata="{_rm}"'
+
     # --- AUTH: extract and validate JWT ---
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer ") or len(auth_header.split(" ", 1)) < 2:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
     token = auth_header.split(" ", 1)[1].strip()
     if not token:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
 
     try:
@@ -285,23 +301,33 @@ async def rest_tool_bridge(request: Request) -> JSONResponse:
         return JSONResponse(
             {"error": "Invalid or expired token", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", error="invalid_token", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer realm="finint", error="invalid_token", resource_metadata="{_rm}"'
+                ),
+            },
         )
 
     # --- SCOPE CHECK: does the user's tier allow this tool? ---
     if not _tier_filter.is_tool_allowed(tool_name, claims):
-        required_scope = TOOL_SCOPE_MAP.get(tool_name, "unknown")
-        log.info("rest_bridge.forbidden", tool=tool_name, tier=claims.tier, required=required_scope)
+        reqs = tool_scope_specs(tool_name)
+        scope_hint = " ".join(reqs) if reqs else "unknown"
+        log.info("rest_bridge.forbidden", tool=tool_name, tier=claims.tier, required=reqs)
         return JSONResponse(
             {
                 "error": f"Insufficient scope for tool '{tool_name}'",
                 "error_code": "FORBIDDEN",
-                "required_scope": required_scope,
+                "required_scopes": list(reqs),
                 "user_tier": claims.tier,
                 "hint": "Upgrade your tier to access this tool.",
             },
             status_code=403,
-            headers={"WWW-Authenticate": f'Bearer realm="finint", error="insufficient_scope", scope="{required_scope}"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer realm="finint", error="insufficient_scope", '
+                    f'resource_metadata="{_rm}", scope="{scope_hint}"'
+                ),
+            },
         )
 
     # --- RATE LIMIT CHECK (best-effort) ---
@@ -375,20 +401,23 @@ async def rest_resource_bridge(request: Request) -> JSONResponse:
 
     Requires a valid Bearer JWT token.
     """
+    _rm = settings.oauth_resource_metadata_url
+    _www_challenge = f'Bearer realm="finint", resource_metadata="{_rm}"'
+
     # --- AUTH ---
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer ") or len(auth_header.split(" ", 1)) < 2:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
     token = auth_header.split(" ", 1)[1].strip()
     if not token:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
     try:
         claims = await _auth_provider.validate_token(token)
@@ -397,7 +426,11 @@ async def rest_resource_bridge(request: Request) -> JSONResponse:
         return JSONResponse(
             {"error": "Invalid or expired token", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", error="invalid_token", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer realm="finint", error="invalid_token", resource_metadata="{_rm}"'
+                ),
+            },
         )
 
     uri = request.query_params.get("uri", "")

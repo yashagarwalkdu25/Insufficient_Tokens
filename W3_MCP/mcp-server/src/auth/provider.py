@@ -28,6 +28,7 @@ class TokenClaims(BaseModel):
     tier: str
     scopes: list[str] = Field(default_factory=list)
     email: str = ""
+    raw_jwt_claims: dict[str, Any] = Field(default_factory=dict)
 
 
 class KeycloakAuthProvider:
@@ -119,6 +120,7 @@ class KeycloakAuthProvider:
             tier=tier,
             scopes=scopes,
             email=payload.get("email", ""),
+            raw_jwt_claims=dict(payload),
         )
 
         logger.info(

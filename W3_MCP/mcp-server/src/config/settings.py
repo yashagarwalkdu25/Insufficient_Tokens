@@ -76,6 +76,12 @@ class Settings(BaseSettings):
         return f"redis://{self.redis_host}:{self.redis_port}"
 
     @property
+    def oauth_resource_metadata_url(self) -> str:
+        """RFC 9728 metadata URL advertised in WWW-Authenticate (MCP + REST)."""
+        base = str(self.oauth_resource_url).rstrip("/")
+        return f"{base}/.well-known/oauth-protected-resource"
+
+    @property
     def keycloak_issuer(self) -> str:
         """Public issuer URL — must match the 'iss' claim in JWT tokens."""
         return f"{self.keycloak_public_url}/realms/{self.keycloak_realm}"

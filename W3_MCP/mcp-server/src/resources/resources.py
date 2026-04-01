@@ -15,15 +15,43 @@ _research_cache: dict[str, dict] = {}
 
 @mcp.resource("market://overview")
 async def market_overview() -> str:
-    """Current market overview: Nifty 50, Sensex, top movers."""
+    """Current market overview: Nifty 50, Sensex, Bank Nifty, top movers (PS1 resource)."""
     nifty = await data_facade.get_price("NIFTY50")
+    sensex = await data_facade.get_price("SENSEX")
+    bank_nifty = await data_facade.get_price("NIFTYBANK")
+    movers = await data_facade.get_price("NSE:MOVERS")
+    gainers = (movers.get("gainers") or [])[:5]
+    losers = (movers.get("losers") or [])[:5]
+    sources = {
+        nifty.get("_source"),
+        sensex.get("_source"),
+        bank_nifty.get("_source"),
+        movers.get("_source"),
+    }
+    sources.discard(None)
     return json.dumps({
         "nifty50": {
             "value": nifty.get("ltp"),
+            "change": nifty.get("change"),
             "change_pct": nifty.get("change_pct"),
         },
-        "source": nifty.get("_source", "unknown"),
+        "sensex": {
+            "value": sensex.get("ltp"),
+            "change": sensex.get("change"),
+            "change_pct": sensex.get("change_pct"),
+        },
+        "bank_nifty": {
+            "value": bank_nifty.get("ltp"),
+            "change": bank_nifty.get("change"),
+            "change_pct": bank_nifty.get("change_pct"),
+        },
+        "top_movers": {
+            "gainers": gainers,
+            "losers": losers,
+        },
+        "source": ",".join(sorted(sources)) if sources else "unknown",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "disclaimer": "For informational purposes only. Not investment advice.",
     })
 
 
