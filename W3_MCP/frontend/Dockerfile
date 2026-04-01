@@ -1,12 +1,16 @@
+# syntax=docker/dockerfile:1
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json ./
-RUN npm install --legacy-peer-deps
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --legacy-peer-deps
 
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Next standalone expects /app/public; COPY fails if the repo has no public/ dir
+RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1
 # Baked at build time for client bundles (override via compose build.args)
 ARG NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:10004
@@ -17,7 +21,8 @@ ENV NEXT_PUBLIC_MCP_SERVER_URL=$NEXT_PUBLIC_MCP_SERVER_URL
 ENV NEXT_PUBLIC_KEYCLOAK_URL=$NEXT_PUBLIC_KEYCLOAK_URL
 ENV NEXT_PUBLIC_KEYCLOAK_REALM=$NEXT_PUBLIC_KEYCLOAK_REALM
 ENV NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=$NEXT_PUBLIC_KEYCLOAK_CLIENT_ID
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache \
+    npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
