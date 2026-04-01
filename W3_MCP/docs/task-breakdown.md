@@ -216,11 +216,12 @@ Every team member should self-assess against this matrix. Assign tasks based on 
 │
 ├── docker-compose.yml    # Everything in one command
 ├── .env.example          # All required API keys with signup links
-├── README.md             # Setup instructions
+├── README.md             # Setup instructions + links to docs/
 └── docs/
-    ├── architecture.md
-    ├── api-reference.md
-    └── skills.md
+    ├── DEPLOYMENT.md     # Local Docker + EC2
+    ├── ARCHITECTURE.md   # Condensed architecture + PDF traceability
+    ├── task-breakdown.md
+    └── MCP.md
 ```
 
 **Task 0.2 — Environment and dependencies**
@@ -631,15 +632,16 @@ Output model (Pydantic, enforced):
 
 ### Phase 8: Documentation and polish (Day 8, ~4 hours)
 
-**Task 8.1 — README.md**
-- One-command setup: `docker compose up`
+**Task 8.1 — README.md + DEPLOYMENT.md**
+- One-command setup: `docker compose up` (from `W3_MCP/`)
+- **`docs/DEPLOYMENT.md`**: local Docker steps, EC2 compose-on-VM, ports, security groups
 - List of required API keys with signup links
 - Troubleshooting section
 - Screenshots of each tab
 
 **Task 8.2 — Architecture diagram**
 - Use the diagrams we created (high-level, CrewAI engine, OAuth flow, data facade)
-- Export as images and embed in `docs/architecture.md`
+- Export as images and embed in `docs/ARCHITECTURE.md`
 
 **Task 8.3 — API documentation**
 - Complete reference of all tools (input schemas, output schemas, required scopes)
