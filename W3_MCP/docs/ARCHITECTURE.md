@@ -5,16 +5,13 @@ FastMCP server + Next.js UI + Keycloak + Postgres + Redis. Structured JSON tools
 | Doc | Role |
 |-----|------|
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Runbooks |
-| [MCP.md](MCP.md) | MCP primitives / protocol |
-| [trust-score.md](trust-score.md) | **Special feature:** cross-source trust score, conflicts, evidence matrix |
-| [task-breakdown.md](task-breakdown.md) | Build checklist |
-| [AI League #3_ MCP.pdf](AI%20League%20%233_%20MCP.pdf) | Spec — traceability [below](#pdf-requirements-traceability) |
+| [MCP.md](MCP.md) | **MCP & HTTP clients only:** `/mcp`, REST bridge, IDE setup, curl — not system design |
 
 ---
 
 ## Contents
 
-[System & data flow](#system--data-flow) · [Routes](#routes) · [Auth & enforcement](#auth--enforcement) · [Data facade & adapters](#data-facade--adapters) · [Cache & limits](#cache--limits) · [CrewAI](#crewai) · [**Cross-source trust score (special feature)**](#cross-source-trust-score-special-feature) · [Persistence](#persistence) · [Frontend & observability](#frontend--observability) · [Repo layout](#repo-layout) · [PDF traceability](#pdf-requirements-traceability) · [Summary](#summary) · [Appendix: REST tool sequence](#appendix-rest-tool-call-sequence)
+[System & data flow](#system--data-flow) · [Routes](#routes) · [Auth & enforcement](#auth--enforcement) · [Data facade & adapters](#data-facade--adapters) · [Cache & limits](#cache--limits) · [CrewAI](#crewai) · [**Cross-source trust score (special feature)**](#cross-source-trust-score-special-feature) · [Persistence](#persistence) · [Frontend & observability](#frontend--observability) · [Repo layout](#repo-layout) · [Requirements traceability](#requirements-traceability) · [Summary](#summary) · [Appendix: REST tool sequence](#appendix-rest-tool-call-sequence)
 
 ---
 
@@ -22,7 +19,7 @@ FastMCP server + Next.js UI + Keycloak + Postgres + Redis. Structured JSON tools
 
 - **Product:** One MCP surface over Indian equities, MF, news, filings, macro; **Free / Premium / Analyst** tiers; cross-source reasoning on analyst tier. A **special differentiator** on analyst cross-source tools is the deterministic **trust score** layer (agreement, contradictions, missing signals)—see [Cross-source trust score](#cross-source-trust-score-special-feature).
 - **Technical:** Upstream keys only on server; tools return JSON (`source`, disclaimers); **Docker Compose** for demo.
-- **Use cases (PDF asks for one; repo implements all three):** PS1 Research (`cross_source`, `research_crew`) · PS2 Portfolio (`portfolio`, `risk_crew`) · PS3 Earnings (`earnings`, `earnings_crew`).
+- **Use cases:** PS1 Research (`cross_source`, `research_crew`) · PS2 Portfolio (`portfolio`, `risk_crew`) · PS3 Earnings (`earnings`, `earnings_crew`) (repo implements all three product tracks).
 
 ---
 
@@ -32,7 +29,7 @@ FastMCP server + Next.js UI + Keycloak + Postgres + Redis. Structured JSON tools
 flowchart TB
   subgraph c["Clients"]
     WEB[Browser :10005]
-    CLI[MCP POST /mcp]
+    CLI[MCP POST /mcp + Bearer]
   end
   subgraph d["Docker Compose"]
     FE[frontend]
@@ -58,7 +55,7 @@ flowchart TB
 | **redis** | L2 cache + per-user rate windows |
 | **keycloak** | Realm `finint`, roles `free` / `premium` / `analyst` |
 
-**Internals (`mcp-server/src`):** `server.py` (ASGI, CORS, routes) → `auth/` (JWT, `TOOL_SCOPE_MAP`, rate limit, audit) → `tools/*`, `resources/`, `prompts/` → `data_facade/` (cache, breakers, `adapters/*`) → `crews/` + `models/`. Analyst cross-source responses are post-processed by **`cross_source/`** (trust envelope); see [below](#cross-source-trust-score-special-feature).
+**Internals (`mcp-server/src`):** `server.py` (ASGI, CORS, routes) → `auth/` (JWT via `provider.py`, **`mcp_keycloak.py`** `KeycloakMCPVerifier` + **`finint_component_auth`** / FastMCP `AuthMiddleware` on `/mcp`, `TOOL_SCOPE_MAP`, `TierToolFilter` for REST, rate limit, audit) → `tools/*`, `resources/`, `prompts/` → `data_facade/` (cache, breakers, `adapters/*`) → `crews/` + `models/`. Analyst cross-source responses are post-processed by **`cross_source/`** (trust envelope); see [below](#cross-source-trust-score-special-feature).
 
 ---
 
@@ -73,6 +70,8 @@ flowchart TB
 
 Tools load via `_register_tools()` importing `tools.*`, `resources.resources`, `prompts.prompts`.
 
+**Wiring MCP or curl to these routes:** [MCP.md](MCP.md).
+
 ---
 
 ## Auth & enforcement
@@ -80,17 +79,19 @@ Tools load via `_register_tools()` importing `tools.*`, `resources.resources`, `
 - **Flow:** User → Keycloak (NextAuth + **PKCE**) → JWT on `Authorization: Bearer` to MCP REST calls.
 - **JWT (`auth/provider.py`):** JWKS (cached), RS256, issuer, audience, `exp`.
 - **Scopes:** From **`realm_access.roles` → highest tier → `TIER_SCOPES[tier]`** in `config/constants.py` (not the JWT `scope` string as primary).
-- **Gating:** `TOOL_SCOPE_MAP` maps each tool → one required scope; `TierToolFilter.is_tool_allowed()`.
+- **Gating:** `TOOL_SCOPE_MAP` maps each tool → one required scope **or** a tuple of scopes (**all** must be present, e.g. `compare_funds` → `mf:read` + `fundamentals:read` for PDF Premium+). REST bridge uses `TierToolFilter.is_tool_allowed()` / `tool_scope_specs()`. Native **`POST /mcp`** uses the same tier-derived scopes via **`KeycloakMCPVerifier`** and **`AuthMiddleware(auth=finint_component_auth)`**, which filters **tools, prompts, and resources** by scope (prompt/resource rules in `mcp_keycloak.py`).
 
 ### Authorization enforcement surfaces
 
 | Surface | JWT | Scope | Rate limit | Audit |
 |---------|-----|-------|------------|-------|
-| `POST /api/tool/{name}` | ✓ | ✓ | Redis | Postgres (best-effort) |
-| `GET /api/resource?uri=` | ✓ | Not `TOOL_SCOPE_MAP` path | — | — |
-| `POST /mcp` | **Not** same Starlette middleware as REST | `filter_tools` exists, **not wired** in `server.py` | — | — |
+| `POST /api/tool/{name}` | ✓ | ✓ (`TOOL_SCOPE_MAP`, multi-scope AND) | Redis | Postgres (best-effort) |
+| `GET /api/resource?uri=` | ✓ | Not `TOOL_SCOPE_MAP` (bridge does not re-check URI scopes) | — | — |
+| `POST /mcp` | ✓ (`KeycloakMCPVerifier`) | ✓ (`AuthMiddleware` + `finint_component_auth`: tools / prompts / resources) | — | — |
 
-**Implication:** Dashboard/REST path is fully gated; native MCP clients need an explicit auth wrapper or client discipline until JWT + `filter_tools` are hooked into the MCP session.
+**Note:** REST resource bridge still authenticates JWT only; **tier-aware resource access** is enforced on the native MCP path. Prefer **`GET /api/resource`** from the dashboard only for trusted UI paths, or extend the bridge with URI→scope checks later.
+
+**Implication:** Dashboard REST and native MCP both require a **valid Bearer JWT**; **`tools/list`**, **prompts**, and **resources** lists on `/mcp` reflect the caller’s tier scopes (PDF capability negotiation).
 
 ---
 
@@ -135,7 +136,7 @@ This is an **intentional product edge**, not generic API aggregation: selected a
 
 | | |
 |--|--|
-| **Spec / rationale** | [trust-score.md](trust-score.md) |
+| **Rationale** | Deterministic agreement / contradiction scoring over normalized multi-source signals (no LLM score). |
 | **Code** | `mcp-server/src/cross_source/` — `signal_normalizer.py`, `conflict_detector.py`, `trust_scorer.py`; entry `compute_trust_envelope()` |
 | **Merged into `data`** | `trust_score`, `signal_summary`, `conflicts`, `evidence_matrix`, `trust_score_reasoning` |
 | **Tools** | `cross_reference_signals`, `generate_research_brief`, `earnings_verdict`, `portfolio_risk_report` |
@@ -165,17 +166,17 @@ CrewAI may still produce narratives and signal rows; the trust layer **re-scores
 
 ```
 W3_MCP/
-├── mcp-server/src/   server.py, auth/, config/, data_facade/, cross_source/, tools/, resources/, prompts/, crews/, models/
+├── mcp-server/src/   server.py, auth/ (provider, middleware, **mcp_keycloak**, …), config/, data_facade/, cross_source/, tools/, resources/, prompts/, crews/, models/
 ├── frontend/
 ├── keycloak/, db/, docker-compose.yml, .env.example
-└── docs/             this file, DEPLOYMENT, MCP, task-breakdown, PDF
+└── docs/             this file, DEPLOYMENT, MCP
 ```
 
 ---
 
-## PDF requirements traceability
+## Requirements traceability
 
-Cross-check: `docs/AI League #3_ MCP.pdf`.
+Implementation checklist versus the original product spec (auth, data sources, tiers, MCP compliance).
 
 ### Data & auth
 
@@ -187,7 +188,7 @@ Cross-check: `docs/AI League #3_ MCP.pdf`.
 | OAuth 2.1 + PKCE | Met | NextAuth + Keycloak |
 | RFC 9728 metadata | Met | `/.well-known/oauth-protected-resource` |
 | JWT validate (sig, exp, aud) | Met | JWKS |
-| 401/403 discovery headers | Partial | JSON 403; WWW-Authenticate incomplete vs spec text |
+| 401/403 discovery headers | Met | REST: `WWW-Authenticate` includes `resource_metadata` from `settings.oauth_resource_metadata_url`; 403 adds `insufficient_scope` + `scope` hint and JSON `required_scopes` (list). MCP transport errors follow FastMCP auth behavior. |
 | Tiers 30/150/500 | Met | Redis |
 | IdP separate from MCP | Met | |
 | Keys server-side only | Met | |
@@ -197,7 +198,7 @@ Cross-check: `docs/AI League #3_ MCP.pdf`.
 | Topic | Status | Note |
 |-------|--------|------|
 | Streamable HTTP + Docker | Met | |
-| Tier-aware `tools/list` | Partial | `filter_tools` not on MCP path |
+| Tier-aware `tools/list` | Met | FastMCP `AuthMiddleware` + `finint_component_auth`; `TierToolFilter.filter_tools` still available for non-MCP consumers |
 | Pagination | Partial | caps/`days`, not uniform offset |
 | Resource subscriptions | Gap | PS2 bonus |
 | Structured errors / facade degrade | Partial | |
@@ -207,19 +208,19 @@ Cross-check: `docs/AI League #3_ MCP.pdf`.
 | Citations / JSON / disclaimers | Met | |
 | `macro:historical` depth | Partial | scopes vs tools |
 | PS1 | Met | |
-| PS2 | Partial | no subscriptions; tier looser than PDF on some tools |
+| PS2 | Partial | No MCP resource **subscriptions** (polling only); `/mcp` tier matrix aligned for tools/prompts/resources; REST `/api/resource` is JWT-only without per-URI scope matrix |
 | PS3 | Met | |
 | Deliverables (README, compose, diagrams) | Met | OpenAPI for all tools: Partial |
 
-**PDF vs code (tiers):** Free tier may use `portfolio_health_check` / `check_concentration_risk` (PDF stricter). **`compare_funds`** → `mf:read` (PDF implies Premium+ for comparison depth).
+**Tier matrix (implementation notes):** PS2-style matrix: `portfolio_health_check` / `check_concentration_risk` are **Premium+** (`portfolio:read`); code matches. **`compare_funds`** requires **`mf:read` and `fundamentals:read`** (AND), so comparison stays **Premium+**.
 
 ---
 
 ## Summary
 
-Stack: **Keycloak** + **FastMCP** (REST bridge + `/mcp`) + **Redis/Postgres** + **DataFacade** + **CrewAI** + **`cross_source` trust envelope** on analyst cross-source tools ([special feature](#cross-source-trust-score-special-feature)).
+Stack: **Keycloak** + **FastMCP** (REST bridge + **`/mcp` with JWT + tier-aware lists** via `KeycloakMCPVerifier` / `AuthMiddleware`) + **Redis/Postgres** + **DataFacade** + **CrewAI** + **`cross_source` trust envelope** on analyst cross-source tools ([special feature](#cross-source-trust-score-special-feature)).
 
-**Hardening:** JWT + `filter_tools` on **`/mcp`**; resource **subscriptions**; align tier matrix with PDF; persist resources; richer **401/403** headers; pagination.
+**Hardening:** Resource **subscriptions** (MCP notify); REST **URI→scope** checks for `/api/resource` if desired; persist watchlist/research resources; **pagination** uniformity; optional **data.gov.in** adapter.
 
 ---
 

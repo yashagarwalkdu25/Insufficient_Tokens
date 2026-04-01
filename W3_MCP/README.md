@@ -7,9 +7,8 @@ MCP (Model Context Protocol) server that exposes Indian market data, fundamental
 | Doc | Use it for |
 |-----|------------|
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local Docker, EC2, ports, security groups, public URL / build args |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, auth enforcement, data facade, persistence, PDF traceability |
-| [docs/MCP.md](docs/MCP.md) | MCP primitives, tools/resources/prompts, protocol notes |
-| [docs/task-breakdown.md](docs/task-breakdown.md) | Build phases and engineering checklist |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, auth enforcement, data facade, persistence, requirements traceability |
+| [docs/MCP.md](docs/MCP.md) | Connecting MCP clients (Claude, VS Code), Bearer on `/mcp`, REST bridge, catalog URL |
 
 ---
 
@@ -23,7 +22,7 @@ W3_MCP/
 ├── db/                  # PostgreSQL init (schema seed)
 ├── docker-compose.yml   # Orchestrates 5 services
 ├── .env.example         # Required and optional API keys (with comments)
-└── docs/                # DEPLOYMENT, ARCHITECTURE, MCP, task-breakdown, hackathon PDF
+└── docs/                # DEPLOYMENT, ARCHITECTURE, MCP
 ```
 
 Source layout inside `mcp-server/src/` and `frontend/` is summarized in [docs/ARCHITECTURE.md — Repo layout](docs/ARCHITECTURE.md#repo-layout).
@@ -85,7 +84,7 @@ curl -s -X POST http://localhost:10004/api/tool/get_stock_quote \
   -d '{"symbol": "RELIANCE"}'
 ```
 
-Scopes, tier matrices, rate limits (30 / 150 / 500 per hour), admin routes, and native MCP vs REST parity: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — see **Auth & enforcement** and **PDF requirements traceability**.
+Scopes, tier matrices, rate limits (30 / 150 / 500 per hour), admin routes, and native MCP vs REST parity: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — see **Auth & enforcement** and **Requirements traceability**.
 
 ---
 
@@ -112,4 +111,4 @@ docker compose exec redis redis-cli FLUSHDB  # clear cache
 
 **Smoke test (tier boundary):** obtain tokens from Keycloak’s token endpoint (password grant is fine for local dev), then call `/api/tool/earnings_verdict` with a **free** token (expect **403**) and an **analyst** token (expect success). Full examples: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) verify section and [docs/ARCHITECTURE.md — Appendix](docs/ARCHITECTURE.md#appendix-rest-tool-call-sequence).
 
-Demo scripts and cross-source walkthroughs for judges: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** and **[docs/MCP.md](docs/MCP.md)** as needed; hackathon spec: `docs/AI League #3_ MCP.pdf`.
+**Architecture and auth:** **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. **MCP / REST client setup:** **[docs/MCP.md](docs/MCP.md)**.
