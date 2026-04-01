@@ -8,9 +8,8 @@ import {
   Shield, Zap, Eye, ExternalLink, Star, Clock, HelpCircle,
 } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, tierBadge } from "@/lib/utils";
-
-const TIER_LEVELS: Record<string, number> = { free: 0, premium: 1, analyst: 2 };
+import { cn, tierBadge, TIER_LEVELS } from "@/lib/utils";
+import { TrustScorePanel } from "@/components/trust-score-panel";
 
 export default function EarningsPage() {
   const { data: session, status } = useSession();
@@ -577,6 +576,7 @@ export default function EarningsPage() {
                     {((verdict.beat_miss as string) || "inline").toUpperCase()} {verdict.surprise_pct != null ? `(${(verdict.surprise_pct as number) > 0 ? "+" : ""}${verdict.surprise_pct}%)` : ""}
                   </div>
                 </div>
+                <TrustScorePanel payload={verdict} />
                 <p className="text-sm leading-relaxed">{verdict.narrative as string}</p>
                 {/* Contradictions */}
                 {((verdict.contradictions as string[]) || []).length > 0 && (

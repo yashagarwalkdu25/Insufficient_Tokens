@@ -8,8 +8,90 @@ from typing import Any
 from ...server import mcp
 from ...data_facade.facade import data_facade
 from ...crews.risk_crew import run_risk_crew
+from ...cross_source import compute_trust_envelope
 
 logger = structlog.get_logger(__name__)
+
+_TOP_MF_FOR_OVERLAP = frozenset(
+    {
+        "HDFCBANK",
+        "ICICIBANK",
+        "RELIANCE",
+        "TCS",
+        "INFY",
+        "ITC",
+        "BHARTIARTL",
+        "SBIN",
+        "LT",
+        "KOTAKBANK",
+    }
+)
+
+
+def _synthetic_portfolio_signals(
+    user_id: str,
+    risk_score: float,
+    alerts: list[dict[str, Any]],
+    macro_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    symbols = [h["symbol"] for h in _get_holdings(user_id)]
+    overlap_count = sum(1 for s in symbols if s in _TOP_MF_FOR_OVERLAP)
+    mf_dir = -0.45 if overlap_count > 5 else (0.2 if overlap_count == 0 else 0.0)
+    sector_stress = any(a.get("alert_type") == "sector_tilt" for a in alerts)
+    conc_stress = any(a.get("alert_type") == "concentration" for a in alerts)
+    if sector_stress and conc_stress:
+        sec_dir = -0.55
+    elif sector_stress:
+        sec_dir = -0.4
+    elif conc_stress:
+        sec_dir = -0.35
+    else:
+        sec_dir = 0.15
+    repo = macro_context.get("repo_rate")
+    try:
+        r = float(repo) if repo is not None else 6.5
+    except (TypeError, ValueError):
+        r = 6.5
+    macro_dir = 0.35 if r < 6.75 else -0.15
+    sent_dir = -0.3 if risk_score > 50 else 0.15
+    return [
+        {
+            "source": "portfolio",
+            "signal_type": "sector_concentration",
+            "direction": sec_dir,
+            "confidence": 0.65,
+        },
+        {
+            "source": "computed",
+            "signal_type": "mf_overlap",
+            "direction": mf_dir,
+            "confidence": 0.55,
+        },
+        {
+            "source": "RBI DBIE",
+            "signal_type": "macro_sensitivity",
+            "direction": macro_dir,
+            "confidence": 0.6,
+        },
+        {
+            "source": "aggregated",
+            "signal_type": "sentiment_shift",
+            "direction": sent_dir,
+            "confidence": 0.5,
+        },
+    ]
+
+
+def _attach_trust_portfolio(data: dict[str, Any]) -> None:
+    ctr = data.get("contradictions")
+    extra = list(ctr) if isinstance(ctr, list) else None
+    data.update(
+        compute_trust_envelope(
+            data.get("signals"),
+            context="portfolio",
+            extra_contradiction_strings=extra,
+        )
+    )
 
 # In-memory portfolio store keyed by user_id
 # TODO: Wire to PostgreSQL via asyncpg
@@ -318,6 +400,7 @@ async def portfolio_risk_report(user_id: str = "demo") -> dict[str, Any]:
         crew_result = await run_risk_crew(holdings, user_id)
         if "error" not in crew_result:
             logger.info("portfolio_risk.crewai_success", user_id=user_id)
+            _attach_trust_portfolio(crew_result)
             return {
                 "data": crew_result,
                 "source": "crewai_risk_crew",
@@ -334,30 +417,35 @@ async def portfolio_risk_report(user_id: str = "demo") -> dict[str, Any]:
 
     # Fallback: heuristic
     logger.info("portfolio_risk.fallback_heuristic", user_id=user_id)
-    summary = await get_portfolio_summary(user_id)
     health = await portfolio_health_check(user_id)
     macro = await data_facade.get_macro()
+    alerts_fb = health["data"]["alerts"]
+    rs = float(health["data"]["risk_score"])
+    macro_ctx = {
+        "repo_rate": macro.get("repo_rate"),
+        "cpi": macro.get("cpi_latest"),
+        "usd_inr": macro.get("usd_inr"),
+    }
+    pr_data: dict[str, Any] = {
+        "user_id": user_id,
+        "risk_score": rs,
+        "alerts": alerts_fb,
+        "macro_context": macro_ctx,
+        "narrative": (
+            f"Portfolio risk score: {health['data']['risk_score']}/100. "
+            f"{len(alerts_fb)} alerts detected. "
+            "(heuristic fallback — CrewAI unavailable)"
+        ),
+        "citations": [
+            {"source": "Angel One / yfinance", "data_point": "stock prices"},
+            {"source": "RBI DBIE", "data_point": "macro indicators"},
+        ],
+        "signals": _synthetic_portfolio_signals(user_id, rs, alerts_fb, macro_ctx),
+    }
+    _attach_trust_portfolio(pr_data)
 
     return {
-        "data": {
-            "user_id": user_id,
-            "risk_score": health["data"]["risk_score"],
-            "alerts": health["data"]["alerts"],
-            "macro_context": {
-                "repo_rate": macro.get("repo_rate"),
-                "cpi": macro.get("cpi_latest"),
-                "usd_inr": macro.get("usd_inr"),
-            },
-            "narrative": (
-                f"Portfolio risk score: {health['data']['risk_score']}/100. "
-                f"{len(health['data']['alerts'])} alerts detected. "
-                "(heuristic fallback — CrewAI unavailable)"
-            ),
-            "citations": [
-                {"source": "Angel One / yfinance", "data_point": "stock prices"},
-                {"source": "RBI DBIE", "data_point": "macro indicators"},
-            ],
-        },
+        "data": pr_data,
         "source": "cross_source_heuristic",
         "cache_status": "miss",
         "timestamp": datetime.now(timezone.utc).isoformat(),

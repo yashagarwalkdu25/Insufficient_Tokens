@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { Search, TrendingUp, TrendingDown, AlertTriangle, FileText, Loader2, Lock, BarChart3, Zap, Crown } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, formatCurrency, formatPercent, tierBadge } from "@/lib/utils";
+import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS } from "@/lib/utils";
+import { TrustScorePanel } from "@/components/trust-score-panel";
 
 interface QuoteData {
   symbol: string;
@@ -53,8 +54,6 @@ interface ShareholdingData {
   _source?: string;
 }
 
-const TIER_LEVELS: Record<string, number> = { free: 0, premium: 1, analyst: 2 };
-
 // Extract a valid ticker symbol from natural language input
 // e.g. "what about TCS" → "TCS", "RELIANCE" → "RELIANCE"
 function extractSymbol(input: string): string | null {
@@ -87,6 +86,7 @@ export default function ResearchPage() {
   const [synthesis, setSynthesis] = useState("");
   const [analysisSource, setAnalysisSource] = useState("");
   const [citations, setCitations] = useState<{source: string; data_point: string; value?: string}[]>([]);
+  const [trustMeta, setTrustMeta] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
   const [source, setSource] = useState("");
 
@@ -127,6 +127,7 @@ export default function ResearchPage() {
     setSynthesis("");
     setCitations([]);
     setAnalysisSource("");
+    setTrustMeta(null);
     setSource("");
   }
 
@@ -224,6 +225,12 @@ export default function ResearchPage() {
       setSynthesis((data.synthesis as string) || "");
       setCitations((data.citations as {source: string; data_point: string; value?: string}[]) || []);
       setAnalysisSource(result.source || "");
+      setTrustMeta({
+        trust_score: data.trust_score,
+        signal_summary: data.signal_summary,
+        conflicts: data.conflicts,
+        trust_score_reasoning: data.trust_score_reasoning,
+      });
     } catch (e: unknown) {
       const msg = (e as Error).message;
       if (msg === "FORBIDDEN") setError("Deep Dive requires Analyst tier.");
@@ -400,6 +407,8 @@ export default function ResearchPage() {
           {analysisSource && (
             <p className="text-xs text-muted-foreground">Powered by: <span className="text-purple-400 font-medium">{analysisSource === "crewai_research_crew" ? "CrewAI Multi-Agent Research Crew (5 agents)" : analysisSource}</span></p>
           )}
+
+          <TrustScorePanel payload={trustMeta} />
 
           {signals.length > 0 && (
             <div className="space-y-2">

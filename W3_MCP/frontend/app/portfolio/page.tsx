@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { Briefcase, Plus, Trash2, ShieldAlert, AlertTriangle, Loader2, Activity, Lock, TrendingUp, Globe, Newspaper, FileText, Upload } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, formatCurrency, formatPercent, tierBadge } from "@/lib/utils";
+import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS } from "@/lib/utils";
+import { TrustScorePanel } from "@/components/trust-score-panel";
 
-const TIER_LEVELS: Record<string, number> = { free: 0, premium: 1, analyst: 2 };
 
 interface Holding {
   symbol: string;
@@ -482,6 +482,7 @@ export default function PortfolioPage() {
 
           {riskReport && (
             <div className="space-y-3">
+              <TrustScorePanel payload={riskReport} />
               {(riskReport.narrative as string) && (
                 <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-sm whitespace-pre-wrap">{riskReport.narrative as string}</div>
               )}

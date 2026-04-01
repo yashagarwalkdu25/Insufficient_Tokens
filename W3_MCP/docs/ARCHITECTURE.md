@@ -6,6 +6,7 @@ FastMCP server + Next.js UI + Keycloak + Postgres + Redis. Structured JSON tools
 |-----|------|
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Runbooks |
 | [MCP.md](MCP.md) | MCP primitives / protocol |
+| [trust-score.md](trust-score.md) | **Special feature:** cross-source trust score, conflicts, evidence matrix |
 | [task-breakdown.md](task-breakdown.md) | Build checklist |
 | [AI League #3_ MCP.pdf](AI%20League%20%233_%20MCP.pdf) | Spec — traceability [below](#pdf-requirements-traceability) |
 
@@ -13,13 +14,13 @@ FastMCP server + Next.js UI + Keycloak + Postgres + Redis. Structured JSON tools
 
 ## Contents
 
-[System & data flow](#system--data-flow) · [Routes](#routes) · [Auth & enforcement](#auth--enforcement) · [Data facade & adapters](#data-facade--adapters) · [Cache & limits](#cache--limits) · [CrewAI](#crewai) · [Persistence](#persistence) · [Frontend & observability](#frontend--observability) · [Repo layout](#repo-layout) · [PDF traceability](#pdf-requirements-traceability) · [Summary](#summary) · [Appendix: REST tool sequence](#appendix-rest-tool-call-sequence)
+[System & data flow](#system--data-flow) · [Routes](#routes) · [Auth & enforcement](#auth--enforcement) · [Data facade & adapters](#data-facade--adapters) · [Cache & limits](#cache--limits) · [CrewAI](#crewai) · [**Cross-source trust score (special feature)**](#cross-source-trust-score-special-feature) · [Persistence](#persistence) · [Frontend & observability](#frontend--observability) · [Repo layout](#repo-layout) · [PDF traceability](#pdf-requirements-traceability) · [Summary](#summary) · [Appendix: REST tool sequence](#appendix-rest-tool-call-sequence)
 
 ---
 
 ## Goals & scope
 
-- **Product:** One MCP surface over Indian equities, MF, news, filings, macro; **Free / Premium / Analyst** tiers; cross-source reasoning on analyst tier.
+- **Product:** One MCP surface over Indian equities, MF, news, filings, macro; **Free / Premium / Analyst** tiers; cross-source reasoning on analyst tier. A **special differentiator** on analyst cross-source tools is the deterministic **trust score** layer (agreement, contradictions, missing signals)—see [Cross-source trust score](#cross-source-trust-score-special-feature).
 - **Technical:** Upstream keys only on server; tools return JSON (`source`, disclaimers); **Docker Compose** for demo.
 - **Use cases (PDF asks for one; repo implements all three):** PS1 Research (`cross_source`, `research_crew`) · PS2 Portfolio (`portfolio`, `risk_crew`) · PS3 Earnings (`earnings`, `earnings_crew`).
 
@@ -57,7 +58,7 @@ flowchart TB
 | **redis** | L2 cache + per-user rate windows |
 | **keycloak** | Realm `finint`, roles `free` / `premium` / `analyst` |
 
-**Internals (`mcp-server/src`):** `server.py` (ASGI, CORS, routes) → `auth/` (JWT, `TOOL_SCOPE_MAP`, rate limit, audit) → `tools/*`, `resources/`, `prompts/` → `data_facade/` (cache, breakers, `adapters/*`) → `crews/` + `models/`.
+**Internals (`mcp-server/src`):** `server.py` (ASGI, CORS, routes) → `auth/` (JWT, `TOOL_SCOPE_MAP`, rate limit, audit) → `tools/*`, `resources/`, `prompts/` → `data_facade/` (cache, breakers, `adapters/*`) → `crews/` + `models/`. Analyst cross-source responses are post-processed by **`cross_source/`** (trust envelope); see [below](#cross-source-trust-score-special-feature).
 
 ---
 
@@ -128,6 +129,22 @@ Cross-source tools run **`research_crew`**, **`risk_crew`**, **`earnings_crew`**
 
 ---
 
+## Cross-source trust score (special feature)
+
+This is an **intentional product edge**, not generic API aggregation: selected analyst tools attach a **deterministic** (no LLM scoring) envelope so clients can show **confidence**, **signal agreement vs contradiction**, and **structured conflicts** across sources.
+
+| | |
+|--|--|
+| **Spec / rationale** | [trust-score.md](trust-score.md) |
+| **Code** | `mcp-server/src/cross_source/` — `signal_normalizer.py`, `conflict_detector.py`, `trust_scorer.py`; entry `compute_trust_envelope()` |
+| **Merged into `data`** | `trust_score`, `signal_summary`, `conflicts`, `evidence_matrix`, `trust_score_reasoning` |
+| **Tools** | `cross_reference_signals`, `generate_research_brief`, `earnings_verdict`, `portfolio_risk_report` |
+| **UI** | `frontend/components/trust-score-panel.tsx` on Research, Earnings verdict, Portfolio risk report |
+
+CrewAI may still produce narratives and signal rows; the trust layer **re-scores in pure Python** from normalized signals plus cross-topic rules (e.g. price vs sentiment, earnings vs price reaction). Heuristic fallbacks use the same path; portfolio heuristic supplies **synthetic signal rows** so the engine stays unified.
+
+---
+
 ## Persistence
 
 **Tables:** `users`, `portfolios`, `watchlists`, `audit_log`, `isin_mapping`, `macro_data`, `cached_research`, `tier_upgrade_requests`.
@@ -138,7 +155,7 @@ Cross-source tools run **`research_crew`**, **`risk_crew`**, **`earnings_crew`**
 
 ## Frontend & observability
 
-- **Next.js App Router:** `research`, `portfolio`, `earnings`, `settings`, `admin`, etc. **`lib/mcp-client.ts`** → REST bridge + Bearer from NextAuth session.
+- **Next.js App Router:** `research`, `portfolio`, `earnings`, `settings`, `admin`, etc. **`lib/mcp-client.ts`** → REST bridge + Bearer from NextAuth session. Analyst views surface the **trust score panel** when tool `data` includes trust fields ([special feature](#cross-source-trust-score-special-feature)).
 - **CORS:** Permissive (`*`) for demo; `Mcp-Session-Id` exposed.
 - **Logs / health / audit / LLM:** `structlog`, `/health`, `/api/status`, `audit_log`, LangSmith.
 
@@ -148,7 +165,7 @@ Cross-source tools run **`research_crew`**, **`risk_crew`**, **`earnings_crew`**
 
 ```
 W3_MCP/
-├── mcp-server/src/   server.py, auth/, config/, data_facade/, tools/, resources/, prompts/, crews/, models/
+├── mcp-server/src/   server.py, auth/, config/, data_facade/, cross_source/, tools/, resources/, prompts/, crews/, models/
 ├── frontend/
 ├── keycloak/, db/, docker-compose.yml, .env.example
 └── docs/             this file, DEPLOYMENT, MCP, task-breakdown, PDF
@@ -200,7 +217,7 @@ Cross-check: `docs/AI League #3_ MCP.pdf`.
 
 ## Summary
 
-Stack: **Keycloak** + **FastMCP** (REST bridge + `/mcp`) + **Redis/Postgres** + **DataFacade** + **CrewAI**.
+Stack: **Keycloak** + **FastMCP** (REST bridge + `/mcp`) + **Redis/Postgres** + **DataFacade** + **CrewAI** + **`cross_source` trust envelope** on analyst cross-source tools ([special feature](#cross-source-trust-score-special-feature)).
 
 **Hardening:** JWT + `filter_tools` on **`/mcp`**; resource **subscriptions**; align tier matrix with PDF; persist resources; richer **401/403** headers; pagination.
 

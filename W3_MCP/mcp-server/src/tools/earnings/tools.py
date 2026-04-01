@@ -16,8 +16,54 @@ from ...server import mcp
 from ...data_facade.facade import data_facade
 from ...data_facade.isin_mapper import isin_mapper, _NIFTY_50 as _NIFTY_50_RAW
 from ...crews.earnings_crew import run_earnings_crew
+from ...cross_source import compute_trust_envelope
 
 logger = structlog.get_logger(__name__)
+
+
+def _synthetic_earnings_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    verdict = payload.get("beat_miss") or "inline"
+    beat_dir = 0.75 if verdict == "beat" else (-0.75 if verdict == "miss" else 0.0)
+    mr = payload.get("market_reaction") or {}
+    try:
+        change_pct = float(mr.get("price_change_pct") or 0)
+    except (TypeError, ValueError):
+        change_pct = 0.0
+    pr_dir = 0.55 if change_pct > 1 else (-0.55 if change_pct < -1 else 0.0)
+    ss = payload.get("shareholding_signal") or {}
+    fii = ss.get("fii_change_pp")
+    sh_dir = 0.0
+    if fii is not None:
+        try:
+            fv = float(fii)
+            sh_dir = 0.45 if fv > 0.5 else (-0.45 if fv < -0.5 else 0.0)
+        except (TypeError, ValueError):
+            pass
+    try:
+        sent = float(payload.get("sentiment_score") or 0)
+    except (TypeError, ValueError):
+        sent = 0.0
+    return [
+        {"source": "results", "signal_type": "earnings_beat_miss", "direction": beat_dir, "confidence": 0.75},
+        {"source": "market", "signal_type": "post_results_reaction", "direction": pr_dir, "confidence": 0.8},
+        {"source": "shareholding", "signal_type": "shareholding_change", "direction": sh_dir, "confidence": 0.65},
+        {"source": "news", "signal_type": "guidance_sentiment", "direction": sent, "confidence": 0.55},
+    ]
+
+
+def _attach_trust_earnings(data: dict[str, Any]) -> None:
+    sigs = data.get("signals")
+    if not isinstance(sigs, list) or len(sigs) == 0:
+        sigs = _synthetic_earnings_signals(data)
+    ctr = data.get("contradictions")
+    extra = list(ctr) if isinstance(ctr, list) else None
+    data.update(
+        compute_trust_envelope(
+            sigs,
+            context="earnings",
+            extra_contradiction_strings=extra,
+        )
+    )
 
 # Known NSE symbols for India-filtering (superset of isin_mapper)
 _INDIAN_SYMBOLS: set[str] = {
@@ -563,6 +609,7 @@ async def earnings_verdict(symbol: str) -> dict[str, Any]:
         crew_result = await run_earnings_crew(symbol)
         if "error" not in crew_result:
             logger.info("earnings_verdict.crewai_success", symbol=symbol)
+            _attach_trust_earnings(crew_result)
             return {
                 "data": crew_result,
                 "source": "crewai_earnings_crew",
@@ -638,35 +685,38 @@ async def earnings_verdict(symbol: str) -> dict[str, Any]:
     if fii_change is not None and fii_change < -1 and verdict == "beat":
         contradictions.append("FII reduced holdings before a beat — possible profit booking ahead of results.")
 
-    return {
-        "data": {
-            "symbol": symbol,
-            "quarter": "latest",
-            "beat_miss": verdict,
-            "surprise_pct": surprise_pct,
-            "filing_highlights": {
-                "eps": actual_eps,
-                "expected_eps": expected_eps,
-                "revenue": fundamentals.get("revenue"),
-                "pe_ratio": fundamentals.get("pe_ratio"),
-            },
-            "market_reaction": {
-                "price_change_pct": change_pct,
-                "price": quote.get("ltp"),
-            },
-            "shareholding_signal": {
-                "fii_change_pp": fii_change,
-            },
-            "sentiment_score": sentiment,
-            "contradictions": contradictions,
-            "narrative": " ".join(narrative_parts),
-            "citations": [
-                {"source": "yfinance", "data_point": f"EPS ₹{actual_eps}", "value": str(actual_eps)},
-                {"source": quote.get("_source", "NSE"), "data_point": f"Price ₹{quote.get('ltp')} ({change_pct:+.1f}%)", "value": str(quote.get("ltp"))},
-                {"source": "shareholding", "data_point": f"FII change {fii_change:+.1f}pp" if fii_change else "FII data unavailable"},
-                {"source": news.get("_source", "news feed"), "data_point": f"Sentiment {sentiment:+.2f} from {len(articles)} articles"},
-            ],
+    ev_data: dict[str, Any] = {
+        "symbol": symbol,
+        "quarter": "latest",
+        "beat_miss": verdict,
+        "surprise_pct": surprise_pct,
+        "filing_highlights": {
+            "eps": actual_eps,
+            "expected_eps": expected_eps,
+            "revenue": fundamentals.get("revenue"),
+            "pe_ratio": fundamentals.get("pe_ratio"),
         },
+        "market_reaction": {
+            "price_change_pct": change_pct,
+            "price": quote.get("ltp"),
+        },
+        "shareholding_signal": {
+            "fii_change_pp": fii_change,
+        },
+        "sentiment_score": sentiment,
+        "contradictions": contradictions,
+        "narrative": " ".join(narrative_parts),
+        "citations": [
+            {"source": "yfinance", "data_point": f"EPS ₹{actual_eps}", "value": str(actual_eps)},
+            {"source": quote.get("_source", "NSE"), "data_point": f"Price ₹{quote.get('ltp')} ({change_pct:+.1f}%)", "value": str(quote.get("ltp"))},
+            {"source": "shareholding", "data_point": f"FII change {fii_change:+.1f}pp" if fii_change else "FII data unavailable"},
+            {"source": news.get("_source", "news feed"), "data_point": f"Sentiment {sentiment:+.2f} from {len(articles)} articles"},
+        ],
+    }
+    _attach_trust_earnings(ev_data)
+
+    return {
+        "data": ev_data,
         "source": "cross_source_heuristic",
         "cache_status": "miss",
         "timestamp": datetime.now(timezone.utc).isoformat(),
