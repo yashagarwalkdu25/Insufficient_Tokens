@@ -4,6 +4,8 @@ Local Docker first, then cloud (EC2) notes.
 
 This stack runs **five** services (MCP server, Next.js frontend, Keycloak, Redis, PostgreSQL). Use **`docker compose` from the `W3_MCP` directory** on your machine or on a VM.
 
+On EC2, build and push images from your laptop (private GitHub is fine—you already have the code), then on the server use **`docker-compose.ec2.yml`** plus `.env`, `keycloak/`, and `db/`. No `git clone` on EC2.
+
 ---
 
 ## Local Docker (recommended)
@@ -48,27 +50,62 @@ docker compose exec redis redis-cli FLUSHDB
 
 ---
 
-## AWS EC2 (Docker Compose on a single instance)
+## AWS EC2 (Docker Hub / registry)
 
-Use this when you want a remote demo of the full stack without publishing multiple images separately.
+Run the full stack on one instance using **pre-built images** for `mcp-server` and `frontend`, plus public images for Keycloak, Redis, and Postgres.
+
+### Fastest path (checklist)
+
+1. **Laptop** — `docker login`, then build and push both images (`linux/amd64`) with the frontend `NEXT_PUBLIC_*` build-args pointing at `http://YOUR_PUBLIC_HOST:10004` and `:10003` (see step 2 below).
+2. **`.env` on the laptop** (you will copy this to EC2) — set at least:
+   - `W3_IMAGE_MCP=your-dockerhub-user/w3-mcp-server:latest`
+   - `W3_IMAGE_FRONTEND=your-dockerhub-user/w3-frontend:latest`
+   - `OAUTH_RESOURCE_URL=http://YOUR_PUBLIC_HOST:10004`
+   - `NEXT_PUBLIC_MCP_SERVER_URL`, `NEXT_PUBLIC_KEYCLOAK_URL`, `NEXTAUTH_URL` to the same public host (`http://YOUR_PUBLIC_HOST:10004` etc.) so server-side auth matches the browser.
+3. **Laptop → EC2** — one `rsync` or `scp` of `docker-compose.ec2.yml`, `.env`, `keycloak/`, `db/` (no repo clone).
+4. **EC2** — `docker compose -f docker-compose.ec2.yml pull && docker compose -f docker-compose.ec2.yml up -d`.
 
 ### 1. Instance sizing
 
-- **4 GB RAM minimum** (Keycloak + Postgres + Next.js build/runtime is heavy).
+- **4 GB RAM minimum** (Keycloak + Postgres + Next.js is heavy).
 - **Amazon Linux 2023** or **Ubuntu 22.04+**.
 
-### 2. Install Docker (Amazon Linux 2023 example)
+### 2. Build and push images (on your laptop or CI)
+
+Use **`linux/amd64`** so images run on typical EC2 instance types.
+
+Replace `YOUR_DOCKERHUB_USER` and set `YOUR_PUBLIC_HOST` to the EC2 public IP or DNS name the **browser** will use.
+
+```bash
+cd W3_MCP
+
+# MCP server
+docker buildx build --platform linux/amd64 -f mcp-server/Dockerfile \
+  -t YOUR_DOCKERHUB_USER/w3-mcp-server:latest ./mcp-server --push
+
+# Frontend — bake public URLs at build time
+docker buildx build --platform linux/amd64 -f frontend/Dockerfile \
+  --build-arg NEXT_PUBLIC_MCP_SERVER_URL=http://YOUR_PUBLIC_HOST:10004 \
+  --build-arg NEXT_PUBLIC_KEYCLOAK_URL=http://YOUR_PUBLIC_HOST:10003 \
+  --build-arg NEXT_PUBLIC_KEYCLOAK_REALM=finint \
+  --build-arg NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=finint-dashboard \
+  -t YOUR_DOCKERHUB_USER/w3-frontend:latest ./frontend --push
+```
+
+If `buildx` is unavailable: `docker build --platform linux/amd64 ...`, then `docker login` and `docker push` each tag.
+
+### 3. Install Docker on EC2 (Amazon Linux 2023 example)
 
 ```bash
 sudo yum update -y
-sudo yum install -y docker git
+sudo yum install -y docker
 sudo systemctl start docker
 sudo systemctl enable docker
 sudo usermod -aG docker ec2-user
 # Log out and back in so `docker` works without sudo
 ```
 
-Install the Compose plugin (if not bundled):
+Install the Compose plugin if needed:
 
 ```bash
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
@@ -77,33 +114,37 @@ sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker
 sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 ```
 
-### 3. Clone and configure
+### 4. Copy files to EC2 (no `git clone`)
+
+Use **`docker-compose.ec2.yml`** in the repo: it pulls `mcp-server` and `frontend` from your registry and does not use `build:`.
+
+From the machine that has your private repo checked out (repo root = `Insufficient_Tokens/`):
 
 ```bash
-git clone <your-repo-url>
-cd Insufficient_Tokens/W3_MCP   # adjust if your clone path differs
-cp .env.example .env
-nano .env   # set OPENAI_API_KEY and optional data API keys
+# From repo root; set USER@HOST (e.g. ec2-user@1.2.3.4)
+export EC2=ec2-user@YOUR_EC2_IP
+
+rsync -avz W3_MCP/docker-compose.ec2.yml W3_MCP/.env "$EC2:~/w3-mcp/"
+rsync -avz W3_MCP/keycloak/ "$EC2:~/w3-mcp/keycloak/"
+rsync -avz W3_MCP/db/ "$EC2:~/w3-mcp/db/"
 ```
 
-### 4. Public URLs and frontend build args
-
-The frontend image is built with `NEXT_PUBLIC_*` URLs. For a public IP or DNS name, set **build arguments** before build so the browser calls the right MCP and Keycloak endpoints.
-
-Edit `docker-compose.yml` **or** export overrides, then build:
+Equivalent with `scp`:
 
 ```bash
-# Example: replace YOUR_EC2_PUBLIC_IP
-export NEXT_PUBLIC_HOST=YOUR_EC2_PUBLIC_IP
-docker compose build --build-arg NEXT_PUBLIC_MCP_SERVER_URL=http://${NEXT_PUBLIC_HOST}:10004 \
-  --build-arg NEXT_PUBLIC_KEYCLOAK_URL=http://${NEXT_PUBLIC_HOST}:10003 \
-  frontend
-docker compose up -d
+scp W3_MCP/docker-compose.ec2.yml W3_MCP/.env ec2-user@YOUR_EC2_IP:~/w3-mcp/
+scp -r W3_MCP/keycloak W3_MCP/db ec2-user@YOUR_EC2_IP:~/w3-mcp/
 ```
 
-Alternatively, change the `args:` under `frontend.build` in `docker-compose.yml` to your public host, then `docker compose up -d --build`.
+On the instance:
 
-Set `OAUTH_RESOURCE_URL` in `.env` to the **browser-reachable** MCP base URL (e.g. `http://YOUR_EC2_PUBLIC_IP:10004`) so OAuth protected-resource metadata matches where clients connect.
+```bash
+cd ~/w3-mcp
+docker compose -f docker-compose.ec2.yml pull
+docker compose -f docker-compose.ec2.yml up -d
+```
+
+After `.env` changes: `docker compose -f docker-compose.ec2.yml up -d` (add `--force-recreate` if services ignore new env). After new images: `pull` then `up -d` again.
 
 ### 5. Security group (AWS console)
 
@@ -119,17 +160,11 @@ Set `OAUTH_RESOURCE_URL` in `.env` to the **browser-reachable** MCP base URL (e.
 ### 6. Management
 
 ```bash
-cd ~/Insufficient_Tokens/W3_MCP   # your path
-docker compose logs -f
-docker compose pull   # only if using pre-pushed images
-docker compose up -d --build
+cd ~/w3-mcp
+docker compose -f docker-compose.ec2.yml logs -f
+docker compose -f docker-compose.ec2.yml pull
+docker compose -f docker-compose.ec2.yml up -d
 ```
-
----
-
-## Optional: pushing images to Docker Hub
-
-You can build and push **each** service image (`mcp-server`, `frontend`, plus use public images for Keycloak/Redis/Postgres), then point `docker-compose.yml` at `image:` instead of `build:`. That is optional and heavier to operate than **compose on EC2** with a single clone + build on the instance.
 
 ---
 

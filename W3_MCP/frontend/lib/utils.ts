@@ -39,6 +39,14 @@ export function tierBadge(tier: string): string {
 
 export type Tier = "free" | "premium" | "analyst" | "admin";
 
+/** Numeric rank for gating premium (≥1) and analyst (≥2) UI. Admin matches analyst access. */
+export const TIER_LEVELS: Record<string, number> = {
+  free: 0,
+  premium: 1,
+  analyst: 2,
+  admin: 2,
+};
+
 export const TIER_CONFIG: Record<
   Tier,
   { label: string; color: string; rateLimit: number }
