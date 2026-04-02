@@ -8,7 +8,7 @@ MCP (Model Context Protocol) server that exposes Indian market data, fundamental
 |-----|------------|
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local Docker, EC2, ports, security groups, public URL / build args |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, auth enforcement, data facade, persistence, requirements traceability |
-| [docs/MCP.md](docs/MCP.md) | Connecting MCP clients (Claude, VS Code), Bearer on `/mcp`, REST bridge, catalog URL |
+| [docs/MCP.md](docs/MCP.md) | Connecting MCP clients (Claude, Cursor, VS Code), Bearer on `/mcp`, REST bridge, catalog URL |
 
 ---
 

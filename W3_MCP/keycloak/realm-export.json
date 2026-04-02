@@ -10,6 +10,14 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
+  "accessTokenLifespan": 14400,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 604800,
+  "ssoSessionMaxLifespan": 2592000,
+  "clientSessionIdleTimeout": 604800,
+  "clientSessionMaxLifespan": 2592000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespan": 5184000,
 
   "roles": {
     "realm": [
@@ -113,7 +121,7 @@
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "authorizationServicesEnabled": false,
       "fullScopeAllowed": true,
@@ -123,11 +131,13 @@
         "http://localhost:10005/*",
         "http://localhost:10005",
         "http://localhost:3000/*",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "*"
       ],
       "webOrigins": [
         "http://localhost:10005",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "*"
       ],
       "defaultClientScopes": [
         "openid",

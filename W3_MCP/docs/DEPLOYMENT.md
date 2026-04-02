@@ -59,9 +59,8 @@ Run the full stack on one instance using **pre-built images** for `mcp-server` a
 1. **Laptop** — `docker login`, then build and push both images (`linux/amd64`) with the frontend `NEXT_PUBLIC_*` build-args pointing at `http://YOUR_PUBLIC_HOST:10004` and `:10003` (see step 2 below).
 2. **`.env` on the laptop** (you will copy this to EC2) — set at least:
    - `DOCKERHUB_USER=your-dockerhub-user` (compose uses `your-dockerhub-user/w3-mcp-server:latest` and `.../w3-frontend:latest`)
-   - `W3_PUBLIC_HOST` — EC2 public IP or DNS (same value as `YOUR_PUBLIC_HOST` in the build commands below)
-   - `OAUTH_RESOURCE_URL`, `NEXT_PUBLIC_MCP_SERVER_URL`, `NEXT_PUBLIC_KEYCLOAK_URL`, and `NEXTAUTH_URL` using `http://${W3_PUBLIC_HOST}` with ports **10004**, **10003**, and **10005** respectively so the browser and OAuth agree
-   - For frontend image builds: after `set -a && . ./.env && set +a`, pass `--build-arg NEXT_PUBLIC_MCP_SERVER_URL=http://${W3_PUBLIC_HOST}:10004` and `--build-arg NEXT_PUBLIC_KEYCLOAK_URL=http://${W3_PUBLIC_HOST}:10003`
+   - `W3_PUBLIC_HOST` — EC2 public IP or DNS only (no `http://`), same value as `YOUR_PUBLIC_HOST` in the build commands below. **`docker-compose.ec2.yml` derives** `KEYCLOAK_PUBLIC_URL`, `OAUTH_RESOURCE_URL`, and the frontend runtime `NEXT_*` / `NEXTAUTH_URL` / `KEYCLOAK_BROWSER_URL` from **`http://${W3_PUBLIC_HOST}:10003|10004|10005`**, so a copied local `.env` with `localhost` for those keys cannot break OAuth on EC2.
+   - For **frontend image builds** (client bundle still needs bake-time URLs): after `set -a && . ./.env && set +a`, pass `--build-arg NEXT_PUBLIC_MCP_SERVER_URL=http://${W3_PUBLIC_HOST}:10004` and `--build-arg NEXT_PUBLIC_KEYCLOAK_URL=http://${W3_PUBLIC_HOST}:10003`
 3. **Laptop → EC2** — one `rsync` or `scp` of `docker-compose.ec2.yml`, `.env`, `keycloak/`, `db/` (no repo clone).
 4. **EC2** — `docker compose -f docker-compose.ec2.yml pull && docker compose -f docker-compose.ec2.yml up -d`.
 
@@ -107,14 +106,21 @@ sudo usermod -aG docker ec2-user
 # Log out and back in so `docker` works without sudo
 ```
 
-Install the Compose plugin if needed:
+**Docker Compose v2:** many Amazon Linux 2023 AMIs have **no** `docker-compose-plugin` RPM (`No match for argument`). Install the CLI plugin from GitHub (works on x86_64 and Graviton `aarch64`):
 
 ```bash
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
-sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
+sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+docker compose version
 ```
+
+Optional: you can try `sudo dnf install -y docker-compose-plugin` first if your AMI’s repos include it.
+
+If `docker compose version` still fails, ensure the binary is named exactly `docker-compose` (with hyphen) inside `cli-plugins/`.
+
+With a `.env` file in `~/w3-mcp/`, Compose loads it automatically; you can run `docker compose -f docker-compose.ec2.yml pull` (no `--env-file` needed).
 
 ### 4. Copy files to EC2 (no `git clone`)
 
@@ -175,8 +181,9 @@ docker compose -f docker-compose.ec2.yml up -d
 | Issue | What to check |
 |-------|----------------|
 | Keycloak never healthy | `docker compose logs keycloak` — first import can take 60s+ |
-| Frontend cannot reach MCP | `NEXT_PUBLIC_MCP_SERVER_URL` must match what the **browser** uses (not `http://mcp-server:10004`) |
-| 401 / OAuth errors | `OAUTH_RESOURCE_URL` and Keycloak realm client settings vs public URL |
+| Sign-in sends you to **localhost:10003** (or callback fails) | `NEXT_PUBLIC_*` is **baked into the frontend image at build** — rebuild/push the frontend with `deploy-image.sh` using your public host. On the server, set **`W3_PUBLIC_HOST`** in `.env` (hostname only, no `http://`); `docker-compose.ec2.yml` derives **`KEYCLOAK_BROWSER_URL`**, **`NEXTAUTH_URL`**, **`KC_HOSTNAME`**, **`OAUTH_RESOURCE_URL`**, and **`KEYCLOAK_PUBLIC_URL`** from it (localhost lines in `.env` no longer override those on EC2). Redeploy a **new frontend image** for the client bundle. After login, Keycloak must allow your dashboard callback — realm export includes a dev-only `*` redirect/web-origin; tighten **Valid redirect URIs** / **Web origins** on `finint-dashboard` for production. |
+| Frontend cannot reach MCP | `NEXT_PUBLIC_MCP_SERVER_URL` must match what the **browser** uses (not `http://mcp-server:10004`) — requires a **frontend rebuild** with the right build-arg, not runtime env alone |
+| 401 / OAuth errors | **`W3_PUBLIC_HOST`** (drives `OAUTH_RESOURCE_URL` / issuer URLs on EC2) and Keycloak realm client settings vs public URL |
 | Out of memory | Increase EC2 instance size or stop unused services |
 
 For development commands and API smoke tests, see the **Quick Start** and **Development** sections in the repository [README.md](../README.md).

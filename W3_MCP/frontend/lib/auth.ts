@@ -2,8 +2,12 @@ import type { NextAuthOptions } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import { KEYCLOAK_ROLE, TIER, type Tier } from "./constants";
 
+// NEXT_PUBLIC_* is baked at `next build` time. For Docker/EC2 without rebuilding the
+// frontend image, set KEYCLOAK_BROWSER_URL at runtime (see docker-compose.ec2.yml).
 const KEYCLOAK_PUBLIC_URL =
-  process.env.NEXT_PUBLIC_KEYCLOAK_URL || "http://localhost:10003";
+  process.env.KEYCLOAK_BROWSER_URL ||
+  process.env.NEXT_PUBLIC_KEYCLOAK_URL ||
+  "http://localhost:10003";
 const KEYCLOAK_INTERNAL_URL =
   process.env.KEYCLOAK_ISSUER || KEYCLOAK_PUBLIC_URL;
 const KEYCLOAK_REALM =

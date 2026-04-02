@@ -9,7 +9,7 @@ How to reach the FinInt MCP server from **MCP clients** (streamable HTTP) and fr
 1. [Endpoints & transport](#1-endpoints--transport)
 2. [Prerequisites](#2-prerequisites)
 3. [Claude Desktop](#3-claude-desktop)
-4. [Claude.ai (remote MCP)](#4-claudeai-remote-mcp)
+4. [Cursor](#4-cursor)
 5. [VS Code (Copilot MCP)](#5-vs-code-copilot-mcp)
 6. [curl: REST bridge & metadata](#6-curl-rest-bridge--metadata)
 7. [Authentication (summary)](#7-authentication-summary)
@@ -61,7 +61,7 @@ Config path examples:
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
 | Linux | `~/.config/Claude/claude_desktop_config.json` |
 
-Add (replace `<YOUR_ACCESS_TOKEN>` with a Keycloak access token — see [§8](#8-demo-users) / curl below):
+Add (replace `<YOUR_ACCESS_TOKEN>` with a Keycloak access token — see [§8](#8-demo-users)):
 
 ```json
 {
@@ -83,11 +83,32 @@ Restart Claude Desktop. Tokens are short-lived (~minutes); refresh when you see 
 
 ---
 
-## 4. Claude.ai (remote MCP)
+## 4. Cursor
 
-The MCP host must be **publicly reachable** (not only localhost). Use your deployed URL or a tunnel (e.g. ngrok, Cloudflare Tunnel) to port **10004**.
+Use **Streamable HTTP** to the same MCP path as other clients. **Global** config: `~/.cursor/mcp.json`. **Project** config: `.cursor/mcp.json` in your repo (do not commit real tokens).
 
-In Claude.ai → Settings → Integrations: URL `https://your-host/mcp`, transport **Streamable HTTP**, authentication **Bearer** with the same Keycloak JWT as above.
+- **URL:** `http://localhost:10004/mcp` locally, or `http://<public-host>:10004/mcp` when the MCP port is reachable (see **DEPLOYMENT.md** for security groups).
+- **Header:** `Authorization: Bearer <access_token>` — obtain a JWT from Keycloak ([§8](#8-demo-users)); tokens expire quickly.
+
+Example shape (field names can vary slightly by Cursor version; prefer **Settings → MCP** if the UI is clearer):
+
+```json
+{
+  "mcpServers": {
+    "finint": {
+      "url": "http://localhost:10004/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer <YOUR_ACCESS_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+`NEXT_PUBLIC_*` / dashboard URLs do not apply here: the IDE talks to **port 10004** with a **Bearer** token, not the browser OAuth flow.
+
+**Deployed (EC2) and logs like `HTTP 404` / `Invalid OAuth error response` / raw body `Not Found`:** Cursor is trying **OAuth discovery** (no stored token). (1) Prefer **`headers.Authorization`** with a JWT from Keycloak so it skips that flow. (2) On the server, **`/.well-known/oauth-protected-resource`** must list an **`authorization_servers`** URL your laptop can reach — set **`KEYCLOAK_PUBLIC_URL`** on the **mcp-server** service to `http://<public-host>:10003` (Compose does this from **`W3_PUBLIC_HOST`** in `docker-compose.ec2.yml`). (3) **Keycloak** must expose RFC 8414 authorization-server metadata (the stack uses **Keycloak 26.5+** in Compose; **24.x** makes this discovery **404**). After upgrading Keycloak, recreate the container / re-import realm as needed.
 
 ---
 
@@ -115,35 +136,20 @@ Use `@finint` in Copilot Chat to target this server.
 
 ## 6. curl: REST bridge & metadata
 
-Obtain a token (example: analyst — use `free_user` / `premium_user` for other tiers):
+Use a **password grant** against Keycloak’s token endpoint (dev/demo only). Client **`finint-dashboard`** must have **Direct access grants** enabled (`Client not allowed for direct access grants` → Keycloak Admin → **Clients** → `finint-dashboard` → enable **Direct access grants** → **Save**). **Postman:** `POST` the same URL with **Body → x-www-form-urlencoded**: `grant_type=password`, `client_id=finint-dashboard`, `username`, `password` ([§8](#8-demo-users)).
+
+On EC2, use your public host for `:10003` / `:10004` (see **DEPLOYMENT.md**).
 
 ```bash
-export TOKEN=$(curl -s -X POST \
-  "http://localhost:10003/realms/finint/protocol/openid-connect/token" \
+TOKEN=$(curl -s -X POST "http://localhost:10003/realms/finint/protocol/openid-connect/token" \
   -d "grant_type=password&client_id=finint-dashboard&username=analyst_user&password=analyst123" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-```
 
-Call a tool:
+curl -sS -X POST "http://localhost:10004/api/tool/get_stock_quote" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"symbol":"RELIANCE"}'
 
-```bash
-curl -s -X POST http://localhost:10004/api/tool/get_stock_quote \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"symbol":"RELIANCE"}' | python3 -m json.tool
-```
-
-Read a resource:
-
-```bash
-curl -s "http://localhost:10004/api/resource?uri=market://overview" \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-```
-
-Protected resource metadata (RFC 9728):
-
-```bash
-curl -s http://localhost:10004/.well-known/oauth-protected-resource | python3 -m json.tool
+curl -sS "http://localhost:10004/.well-known/oauth-protected-resource"
 ```
 
 ---
@@ -173,6 +179,8 @@ Client ──► Keycloak (:10003) ──► JWT
 | `free_user` | `free123` | Free |
 | `premium_user` | `premium123` | Premium |
 | `analyst_user` | `analyst123` | Analyst |
+
+Realm import sets longer **dev-oriented** lifetimes (see `keycloak/realm-export.json`): access token **4h** (`expires_in`), SSO/client session max **30d** (drives **`refresh_expires_in`**). Existing Keycloak data is not updated when you edit the JSON — use **Realm settings → Tokens** (and **Sessions**) in the admin UI, or re-import after a fresh Keycloak volume.
 
 Password grant (free tier example):
 

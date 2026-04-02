@@ -1,6 +1,8 @@
 # EC2 / registry deploy: pull pre-built mcp-server + frontend images (private GitHub is fine).
 # Use: docker compose -f docker-compose.ec2.yml up -d
-# Set DOCKERHUB_USER and public URLs in .env (see docs/DEPLOYMENT.md).
+# Set DOCKERHUB_USER and W3_PUBLIC_HOST in .env (see docs/DEPLOYMENT.md).
+# Public MCP/Keycloak URLs are derived ONLY from W3_PUBLIC_HOST here (not KEYCLOAK_PUBLIC_URL / OAUTH_RESOURCE_URL
+# from .env), so copying a local .env cannot point OAuth metadata at localhost on EC2.
 # Keep this file in sync with docker-compose.yml when service definitions change (except build → image).
 
 services:
@@ -25,9 +27,10 @@ services:
       - REDIS_PORT=6379
       - KEYCLOAK_URL=http://keycloak:8080
       - KEYCLOAK_REALM=finint
+      - KEYCLOAK_PUBLIC_URL=http://${W3_PUBLIC_HOST:-localhost}:10003
       - MCP_SERVER_HOST=0.0.0.0
       - MCP_SERVER_PORT=10004
-      - OAUTH_RESOURCE_URL=${OAUTH_RESOURCE_URL:-http://localhost:10004}
+      - OAUTH_RESOURCE_URL=http://${W3_PUBLIC_HOST:-localhost}:10004
       - MCP_SERVER_URL=http://mcp-server:10004
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LANGCHAIN_TRACING_V2=true
@@ -64,14 +67,17 @@ services:
     environment:
       - PORT=10005
       - HOSTNAME=0.0.0.0
-      - NEXT_PUBLIC_MCP_SERVER_URL=${NEXT_PUBLIC_MCP_SERVER_URL:-http://localhost:10004}
-      - NEXT_PUBLIC_KEYCLOAK_URL=${NEXT_PUBLIC_KEYCLOAK_URL:-http://localhost:10003}
+      # Runtime OAuth URLs — same W3_PUBLIC_HOST rule as mcp-server (ignore localhost from a copied .env).
+      - KEYCLOAK_BROWSER_URL=http://${W3_PUBLIC_HOST:-localhost}:10003
+      - NEXTAUTH_URL=http://${W3_PUBLIC_HOST:-localhost}:10005
+      # Baked at image build time for browser bundle; still set from W3_PUBLIC_HOST for SSR / consistency
+      - NEXT_PUBLIC_MCP_SERVER_URL=http://${W3_PUBLIC_HOST:-localhost}:10004
+      - NEXT_PUBLIC_KEYCLOAK_URL=http://${W3_PUBLIC_HOST:-localhost}:10003
       - NEXT_PUBLIC_KEYCLOAK_REALM=${NEXT_PUBLIC_KEYCLOAK_REALM:-finint}
       - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${NEXT_PUBLIC_KEYCLOAK_CLIENT_ID:-finint-dashboard}
       - KEYCLOAK_ISSUER=http://keycloak:8080
       - KEYCLOAK_ADMIN=admin
       - KEYCLOAK_ADMIN_PASSWORD=admin
-      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:10005}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-finint-nextauth-secret-change-in-prod}
       - NEXTAUTH_DEBUG=true
     networks:
@@ -79,13 +85,15 @@ services:
     restart: unless-stopped
 
   keycloak:
-    image: quay.io/keycloak/keycloak:24.0
+    # MCP OAuth discovery (RFC 8414); see Keycloak release notes “authorization server in MCP”.
+    image: quay.io/keycloak/keycloak:26.5.0
     command: start-dev --import-realm
     ports: ["10003:8080"]
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_HOSTNAME: localhost
+      # Issuer and login pages must match the host browsers use (set W3_PUBLIC_HOST in .env)
+      KC_HOSTNAME: ${W3_PUBLIC_HOST:-localhost}
       KC_HOSTNAME_PORT: "10003"
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
