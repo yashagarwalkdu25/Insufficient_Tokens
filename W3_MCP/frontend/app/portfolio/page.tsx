@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { Briefcase, Plus, Trash2, ShieldAlert, AlertTriangle, Loader2, Activity, Lock, TrendingUp, Globe, Newspaper, FileText, Upload } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS } from "@/lib/utils";
+import { MCP_CLIENT, TIER } from "@/lib/constants";
+import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS, type Tier } from "@/lib/utils";
 import { TrustScorePanel } from "@/components/trust-score-panel";
 
 
@@ -32,8 +33,8 @@ interface SentimentShift {
 
 export default function PortfolioPage() {
   const { data: session, status } = useSession();
-  const tier = (session?.tier as string) ?? "free";
-  const tierLevel = TIER_LEVELS[tier] ?? 0;
+  const tier = (session?.tier as string) ?? TIER.Free;
+  const tierLevel = TIER_LEVELS[tier as Tier] ?? 0;
   const token = session?.accessToken;
 
   const [symbol, setSymbol] = useState("");
@@ -132,7 +133,7 @@ export default function PortfolioPage() {
       setRiskScore(data.risk_score as number);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("Health check requires Premium tier.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("Health check requires Premium tier.");
       else setError("Failed to run health check.");
     } finally { setLoading(false); }
   }
@@ -151,7 +152,7 @@ export default function PortfolioPage() {
       setSentimentShifts((sentData.shifts as SentimentShift[]) || []);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("MF overlap / macro / sentiment requires Premium tier.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("MF overlap / macro / sentiment requires Premium tier.");
       else setError("Failed to run premium analysis.");
     } finally { setLoadingPremium(false); }
   }
@@ -165,7 +166,7 @@ export default function PortfolioPage() {
       setRiskReport(result.data as Record<string, unknown>);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("Risk report requires Analyst tier.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("Risk report requires Analyst tier.");
       else setError("Failed to generate risk report.");
     } finally { setLoadingAnalyst(false); }
   }
@@ -178,7 +179,7 @@ export default function PortfolioPage() {
       setWhatIfResult(data.narrative as string);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("What-if analysis requires Analyst tier.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("What-if analysis requires Analyst tier.");
       else setError("Failed to run scenario analysis.");
     } finally { setLoadingAnalyst(false); }
   }
@@ -237,7 +238,7 @@ export default function PortfolioPage() {
       <div className="rounded-xl border border-border bg-card p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold flex items-center gap-2"><Plus className="h-4 w-4" /> Add Holding</h3>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("free"))}>Free</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Free))}>Free</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <input placeholder="Symbol" value={symbol} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSymbol(e.target.value.toUpperCase())} className="px-3 py-2 rounded-md bg-secondary border border-border text-sm w-32" />
@@ -362,7 +363,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-emerald-400" /> Health Check &amp; Concentration Risk</h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium+</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium+</span>
               {tierLevel >= 1 ? (
                 <button onClick={handleHealthCheck} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-50">
                   {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Run Check"}
@@ -397,7 +398,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold flex items-center gap-2"><TrendingUp className="h-4 w-4 text-amber-400" /> Risk Intelligence</h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium+</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium+</span>
               {tierLevel >= 1 ? (
                 <button onClick={handlePremiumAnalysis} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
                   {loadingPremium ? <Loader2 className="h-3 w-3 animate-spin" /> : "Run Analysis"}
@@ -465,7 +466,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold flex items-center gap-2"><FileText className="h-4 w-4 text-purple-400" /> Cross-Source Risk Report</h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst Only</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst Only</span>
               {tierLevel >= 2 ? (
                 <button onClick={handleRiskReport} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
                   {loadingAnalyst ? <Loader2 className="h-3 w-3 animate-spin" /> : "Generate Report"}
@@ -505,7 +506,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold flex items-center gap-2"><Activity className="h-4 w-4 text-purple-400" /> What-If Simulator</h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst Only</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst Only</span>
             </div>
           </div>
 

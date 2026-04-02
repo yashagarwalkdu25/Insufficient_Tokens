@@ -8,13 +8,19 @@ import {
   Shield, Zap, Eye, ExternalLink, Star, Clock, HelpCircle,
 } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, tierBadge, TIER_LEVELS } from "@/lib/utils";
+import {
+  EARNINGS_PANEL_FETCH,
+  earningsPanelIsPremium,
+  type EarningsPanelKey,
+} from "@/lib/earnings-panels";
+import { MCP_CLIENT, TIER } from "@/lib/constants";
+import { cn, tierBadge, TIER_LEVELS, type Tier } from "@/lib/utils";
 import { TrustScorePanel } from "@/components/trust-score-panel";
 
 export default function EarningsPage() {
   const { data: session, status } = useSession();
-  const tier = session?.tier ?? "free";
-  const tierLevel = TIER_LEVELS[tier] ?? 0;
+  const tier = session?.tier ?? TIER.Free;
+  const tierLevel = TIER_LEVELS[tier as Tier] ?? 0;
   const token = session?.accessToken;
 
   const [calendar, setCalendar] = useState<Record<string, unknown>[]>([]);
@@ -34,8 +40,68 @@ export default function EarningsPage() {
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
 
+  /** Panel open = show block; click again to hide and clear data (checkbox-style). */
+  const [openPanels, setOpenPanels] = useState<Partial<Record<EarningsPanelKey, boolean>>>({});
+
   function setLoad(key: string) { setLoading(key); setError(""); }
   function clearLoad() { setLoading(""); }
+
+  function setPanelData(key: EarningsPanelKey, data: Record<string, unknown> | null) {
+    switch (key) {
+      case "eps":
+        setEpsHistory(data);
+        break;
+      case "pre":
+        setPreProfile(data);
+        break;
+      case "expect":
+        setExpectations(data);
+        break;
+      case "options":
+        setOptionChain(data);
+        break;
+      case "reaction":
+        setPostReaction(data);
+        break;
+      case "avse":
+        setActualVsExpected(data);
+        break;
+      case "verdict":
+        setVerdict(data);
+        break;
+      case "dashboard":
+        setDashboard(data);
+        break;
+      case "compare":
+        setComparison(data);
+        break;
+    }
+  }
+
+  function closePanel(key: EarningsPanelKey) {
+    setOpenPanels((o: Partial<Record<EarningsPanelKey, boolean>>) => ({ ...o, [key]: false }));
+    setPanelData(key, null);
+  }
+
+  const panelBtn = (active: boolean, premium: boolean) =>
+    cn(
+      "px-3 py-1.5 rounded-md text-xs font-medium transition-colors border disabled:opacity-50",
+      premium
+        ? active
+          ? "bg-amber-500 text-white border-amber-300 ring-2 ring-amber-400/60"
+          : "bg-amber-600/80 text-white border-transparent hover:bg-amber-500"
+        : active
+          ? "bg-purple-500 text-white border-purple-300 ring-2 ring-purple-400/60"
+          : "bg-purple-600 text-white border-transparent hover:bg-purple-500",
+    );
+
+  function panelButtonDisabled(key: EarningsPanelKey) {
+    const spec = EARNINGS_PANEL_FETCH[key];
+    if (openPanels[key]) return !!loading;
+    if (spec.needsCompareSymbols) return !!loading || !compareSymbols.trim();
+    if (spec.needsSymbol) return !!loading || !symbol.trim();
+    return !!loading;
+  }
 
   // --- AUTH GATE: require login (after all hooks) ---
   if (status === "loading") {
@@ -76,110 +142,29 @@ export default function EarningsPage() {
     finally { clearLoad(); }
   }
 
-  async function handleEpsHistory() {
-    if (!symbol) return;
-    setLoad("eps");
+  async function togglePanel(key: EarningsPanelKey) {
+    const spec = EARNINGS_PANEL_FETCH[key];
+    if (openPanels[key]) {
+      closePanel(key);
+      return;
+    }
+    if (spec.needsCompareSymbols && !compareSymbols.trim()) return;
+    if (spec.needsSymbol && !symbol.trim()) return;
+    setLoad(key);
     try {
-      const result = await callMCPTool("get_eps_history", { symbol: symbol.toUpperCase(), quarters: 8 }, token);
-      setEpsHistory(result.data as Record<string, unknown>);
+      const ctx = {
+        symbolUpper: symbol.trim().toUpperCase(),
+        compareSymbols: compareSymbols.trim(),
+      };
+      const result = await callMCPTool(spec.tool, spec.buildBody(ctx), token);
+      setPanelData(key, result.data as Record<string, unknown>);
+      setOpenPanels((o: Partial<Record<EarningsPanelKey, boolean>>) => ({ ...o, [key]: true }));
     } catch (e) {
       const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "EPS History requires Premium tier." : "Failed to load EPS history.");
-    } finally { clearLoad(); }
-  }
-
-  async function handlePreEarnings() {
-    if (!symbol) return;
-    setLoad("pre");
-    try {
-      const result = await callMCPTool("get_pre_earnings_profile", { symbol: symbol.toUpperCase() }, token);
-      setPreProfile(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Pre-earnings profile requires Premium tier." : "Failed to load pre-earnings profile.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleExpectations() {
-    if (!symbol) return;
-    setLoad("expect");
-    try {
-      const result = await callMCPTool("get_analyst_expectations", { symbol: symbol.toUpperCase() }, token);
-      setExpectations(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Analyst expectations requires Premium tier." : "Failed to load expectations.");
-    } finally { clearLoad(); }
-  }
-
-  async function handlePostReaction() {
-    if (!symbol) return;
-    setLoad("reaction");
-    try {
-      const result = await callMCPTool("get_post_results_reaction", { symbol: symbol.toUpperCase() }, token);
-      setPostReaction(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Post-results reaction requires Premium tier." : "Failed to load post-results reaction.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleActualVsExpected() {
-    if (!symbol) return;
-    setLoad("avse");
-    try {
-      const result = await callMCPTool("compare_actual_vs_expected", { symbol: symbol.toUpperCase() }, token);
-      setActualVsExpected(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Beat/miss analysis requires Premium tier." : "Failed to compare actual vs expected.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleOptionChain() {
-    if (!symbol) return;
-    setLoad("options");
-    try {
-      const result = await callMCPTool("get_option_chain", { symbol: symbol.toUpperCase() }, token);
-      setOptionChain(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Option chain requires Premium tier." : "Failed to load option chain.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleVerdict() {
-    if (!symbol) return;
-    setLoad("verdict");
-    try {
-      const result = await callMCPTool("earnings_verdict", { symbol: symbol.toUpperCase() }, token);
-      setVerdict(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Earnings verdict requires Analyst tier." : "Failed to run earnings verdict.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleDashboard() {
-    setLoad("dashboard");
-    try {
-      const result = await callMCPTool("earnings_season_dashboard", {}, token);
-      setDashboard(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Season dashboard requires Analyst tier." : "Failed to load dashboard.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleCompare() {
-    setLoad("compare");
-    try {
-      const result = await callMCPTool("compare_quarterly_performance", { symbols: compareSymbols }, token);
-      setComparison(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Quarterly comparison requires Analyst tier." : "Failed to compare.");
-    } finally { clearLoad(); }
+      setError(msg === MCP_CLIENT.Error.Forbidden ? spec.forbiddenMsg : spec.loadFailedMsg);
+    } finally {
+      clearLoad();
+    }
   }
 
   const isLoading = (key: string) => loading === key;
@@ -210,7 +195,7 @@ export default function EarningsPage() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h3 className="font-semibold flex items-center gap-2">
             <Calendar className="h-4 w-4 text-emerald-400" /> Upcoming Earnings
-            <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("free"))}>Free</span>
+            <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Free))}>Free</span>
             {calendarCount > 0 && <span className="text-xs text-muted-foreground">({calendarCount} results)</span>}
           </h3>
           <div className="flex items-center gap-2">
@@ -328,7 +313,7 @@ export default function EarningsPage() {
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             className="px-3 py-2 rounded-md bg-secondary border border-border text-sm w-36"
           />
-          <span className="text-xs text-muted-foreground">Select a tool:</span>
+          <span className="text-xs text-muted-foreground">Toggle a tool (click again to hide data):</span>
         </div>
       </div>
 
@@ -339,7 +324,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <TrendingUp className="h-5 w-5 text-amber-400" />
           <h2 className="text-lg font-semibold">Pre-Earnings Analysis</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium</span>
           {tierLevel < 1 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -349,22 +334,46 @@ export default function EarningsPage() {
           <>
             {/* Action buttons row */}
             <div className="flex flex-wrap gap-2">
-              <button onClick={handleEpsHistory} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("eps") ? <Spin /> : "EPS History"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.eps}
+                onClick={() => void togglePanel("eps")}
+                disabled={panelButtonDisabled("eps")}
+                className={panelBtn(!!openPanels.eps, earningsPanelIsPremium("eps"))}
+              >
+                {isLoading("eps") ? <Spin /> : EARNINGS_PANEL_FETCH.eps.label}
               </button>
-              <button onClick={handlePreEarnings} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("pre") ? <Spin /> : "Pre-Earnings Profile"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.pre}
+                onClick={() => void togglePanel("pre")}
+                disabled={panelButtonDisabled("pre")}
+                className={panelBtn(!!openPanels.pre, earningsPanelIsPremium("pre"))}
+              >
+                {isLoading("pre") ? <Spin /> : EARNINGS_PANEL_FETCH.pre.label}
               </button>
-              <button onClick={handleExpectations} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("expect") ? <Spin /> : "Analyst Expectations"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.expect}
+                onClick={() => void togglePanel("expect")}
+                disabled={panelButtonDisabled("expect")}
+                className={panelBtn(!!openPanels.expect, earningsPanelIsPremium("expect"))}
+              >
+                {isLoading("expect") ? <Spin /> : EARNINGS_PANEL_FETCH.expect.label}
               </button>
-              <button onClick={handleOptionChain} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("options") ? <Spin /> : "Option Chain"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.options}
+                onClick={() => void togglePanel("options")}
+                disabled={panelButtonDisabled("options")}
+                className={panelBtn(!!openPanels.options, earningsPanelIsPremium("options"))}
+              >
+                {isLoading("options") ? <Spin /> : EARNINGS_PANEL_FETCH.options.label}
               </button>
             </div>
 
             {/* EPS History */}
-            {epsHistory && (
+            {openPanels.eps && epsHistory && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><TrendingUp className="h-3 w-3" /> EPS History: {epsHistory.symbol as string}</h4>
                 <p className="text-xs text-muted-foreground">
@@ -394,7 +403,7 @@ export default function EarningsPage() {
             )}
 
             {/* Pre-Earnings Profile */}
-            {preProfile && (
+            {openPanels.pre && preProfile && (
               <div className="rounded-lg border border-border p-4 space-y-3">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><Target className="h-3 w-3" /> Pre-Earnings Profile: {preProfile.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
@@ -444,7 +453,7 @@ export default function EarningsPage() {
             )}
 
             {/* Analyst Expectations */}
-            {expectations && (
+            {openPanels.expect && expectations && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><Eye className="h-3 w-3" /> Analyst Expectations: {expectations.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -457,7 +466,7 @@ export default function EarningsPage() {
             )}
 
             {/* Option Chain */}
-            {optionChain && (
+            {openPanels.options && optionChain && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><Activity className="h-3 w-3" /> Option Chain: {optionChain.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -479,7 +488,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <ArrowUpDown className="h-5 w-5 text-amber-400" />
           <h2 className="text-lg font-semibold">Post-Earnings Analysis</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium</span>
           {tierLevel < 1 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -488,16 +497,28 @@ export default function EarningsPage() {
         ) : (
           <>
             <div className="flex flex-wrap gap-2">
-              <button onClick={handlePostReaction} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("reaction") ? <Spin /> : "Post-Results Reaction"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.reaction}
+                onClick={() => void togglePanel("reaction")}
+                disabled={panelButtonDisabled("reaction")}
+                className={panelBtn(!!openPanels.reaction, earningsPanelIsPremium("reaction"))}
+              >
+                {isLoading("reaction") ? <Spin /> : EARNINGS_PANEL_FETCH.reaction.label}
               </button>
-              <button onClick={handleActualVsExpected} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("avse") ? <Spin /> : "Beat / Miss Analysis"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.avse}
+                onClick={() => void togglePanel("avse")}
+                disabled={panelButtonDisabled("avse")}
+                className={panelBtn(!!openPanels.avse, earningsPanelIsPremium("avse"))}
+              >
+                {isLoading("avse") ? <Spin /> : EARNINGS_PANEL_FETCH.avse.label}
               </button>
             </div>
 
             {/* Post-Results Reaction */}
-            {postReaction && (
+            {openPanels.reaction && postReaction && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm">Post-Results Reaction: {postReaction.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -515,7 +536,7 @@ export default function EarningsPage() {
             )}
 
             {/* Actual vs Expected */}
-            {actualVsExpected && (
+            {openPanels.avse && actualVsExpected && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm">Beat / Miss: {actualVsExpected.symbol as string}</h4>
                 <div className="flex items-center gap-3">
@@ -546,7 +567,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-purple-400" />
           <h2 className="text-lg font-semibold">Cross-Source Earnings Verdict</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst</span>
           {tierLevel < 2 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -555,16 +576,28 @@ export default function EarningsPage() {
         ) : (
           <>
             <div className="flex flex-wrap gap-2">
-              <button onClick={handleVerdict} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
-                {isLoading("verdict") ? <Spin /> : "Run Earnings Verdict"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.verdict}
+                onClick={() => void togglePanel("verdict")}
+                disabled={panelButtonDisabled("verdict")}
+                className={panelBtn(!!openPanels.verdict, earningsPanelIsPremium("verdict"))}
+              >
+                {isLoading("verdict") ? <Spin /> : EARNINGS_PANEL_FETCH.verdict.label}
               </button>
-              <button onClick={handleDashboard} disabled={!!loading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
-                {isLoading("dashboard") ? <Spin /> : "Season Dashboard"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.dashboard}
+                onClick={() => void togglePanel("dashboard")}
+                disabled={panelButtonDisabled("dashboard")}
+                className={panelBtn(!!openPanels.dashboard, earningsPanelIsPremium("dashboard"))}
+              >
+                {isLoading("dashboard") ? <Spin /> : EARNINGS_PANEL_FETCH.dashboard.label}
               </button>
             </div>
 
             {/* Verdict */}
-            {verdict && (
+            {openPanels.verdict && verdict && (
               <div className="rounded-lg border border-border p-4 space-y-3">
                 <div className="flex items-center gap-3">
                   <h4 className="font-semibold">Verdict: {verdict.symbol as string}</h4>
@@ -600,7 +633,7 @@ export default function EarningsPage() {
             )}
 
             {/* Season Dashboard */}
-            {dashboard && (
+            {openPanels.dashboard && dashboard && (
               <div className="rounded-lg border border-border p-4 space-y-3">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><BarChart3 className="h-3 w-3" /> Earnings Season Dashboard</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
@@ -632,7 +665,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-purple-400" />
           <h2 className="text-lg font-semibold">Quarterly Performance Comparison</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst</span>
           {tierLevel < 2 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -642,11 +675,17 @@ export default function EarningsPage() {
           <>
             <div className="flex gap-2">
               <input value={compareSymbols} onChange={(e) => setCompareSymbols(e.target.value.toUpperCase())} placeholder="TCS,INFY,WIPRO" className="px-3 py-2 rounded-md bg-secondary border border-border text-sm flex-1" />
-              <button onClick={handleCompare} disabled={!!loading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
-                {isLoading("compare") ? <Spin /> : "Compare"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.compare}
+                onClick={() => void togglePanel("compare")}
+                disabled={panelButtonDisabled("compare")}
+                className={panelBtn(!!openPanels.compare, earningsPanelIsPremium("compare"))}
+              >
+                {isLoading("compare") ? <Spin /> : EARNINGS_PANEL_FETCH.compare.label}
               </button>
             </div>
-            {comparison && (
+            {openPanels.compare && comparison && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-secondary/50">

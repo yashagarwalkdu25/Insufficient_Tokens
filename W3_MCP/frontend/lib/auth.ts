@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
 import type { JWT } from "next-auth/jwt";
+import { KEYCLOAK_ROLE, TIER, type Tier } from "./constants";
 
 const KEYCLOAK_PUBLIC_URL =
   process.env.NEXT_PUBLIC_KEYCLOAK_URL || "http://localhost:10003";
@@ -92,7 +93,7 @@ export const authOptions: NextAuthOptions = {
       return refreshAccessToken(token);
     },
     async session({ session, token }) {
-      const tier = (token.tier as string) || "free";
+      const tier = (token.tier as string) || TIER.Free;
       return {
         ...session,
         accessToken: token.accessToken,
@@ -114,16 +115,16 @@ export const authOptions: NextAuthOptions = {
   },
 };
 
-function getTierFromRoles(roles: string[]): string {
-  if (roles.includes("admin")) return "admin";
-  if (roles.includes("analyst")) return "analyst";
-  if (roles.includes("premium")) return "premium";
-  return "free";
+function getTierFromRoles(roles: string[]): Tier {
+  if (roles.includes(KEYCLOAK_ROLE.Admin)) return TIER.Admin;
+  if (roles.includes(KEYCLOAK_ROLE.Analyst)) return TIER.Analyst;
+  if (roles.includes(KEYCLOAK_ROLE.Premium)) return TIER.Premium;
+  return TIER.Free;
 }
 
 function getScopesForTier(tier: string): string[] {
   const base = ["market:read", "mf:read", "news:read", "watchlist:read", "watchlist:write"];
-  if (tier === "free") return base;
+  if (tier === TIER.Free) return base;
 
   const premium = [
     ...base,
@@ -134,7 +135,7 @@ function getScopesForTier(tier: string): string[] {
     "portfolio:write",
     "filings:read",
   ];
-  if (tier === "premium") return premium;
+  if (tier === TIER.Premium) return premium;
 
   return [
     ...premium,

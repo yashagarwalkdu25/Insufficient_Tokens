@@ -1,5 +1,9 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { TIER, type Tier } from "./constants";
+
+export type { Tier } from "./constants";
+export { TIER } from "./constants";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -22,37 +26,35 @@ export function formatPercent(value: number | null | undefined): string {
 
 export function tierColor(tier: string): string {
   switch (tier) {
-    case "analyst": return "text-purple-400";
-    case "premium": return "text-amber-400";
+    case TIER.Analyst: return "text-purple-400";
+    case TIER.Premium: return "text-amber-400";
     default: return "text-emerald-400";
   }
 }
 
 export function tierBadge(tier: string): string {
   switch (tier) {
-    case "admin": return "bg-red-500/20 text-red-300 border-red-500/30";
-    case "analyst": return "bg-purple-500/20 text-purple-300 border-purple-500/30";
-    case "premium": return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+    case TIER.Admin: return "bg-red-500/20 text-red-300 border-red-500/30";
+    case TIER.Analyst: return "bg-purple-500/20 text-purple-300 border-purple-500/30";
+    case TIER.Premium: return "bg-amber-500/20 text-amber-300 border-amber-500/30";
     default: return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
   }
 }
 
-export type Tier = "free" | "premium" | "analyst" | "admin";
-
 /** Numeric rank for gating premium (≥1) and analyst (≥2) UI. Admin matches analyst access. */
-export const TIER_LEVELS: Record<string, number> = {
-  free: 0,
-  premium: 1,
-  analyst: 2,
-  admin: 2,
+export const TIER_LEVELS: Record<Tier, number> = {
+  [TIER.Free]: 0,
+  [TIER.Premium]: 1,
+  [TIER.Analyst]: 2,
+  [TIER.Admin]: 2,
 };
 
 export const TIER_CONFIG: Record<
   Tier,
   { label: string; color: string; rateLimit: number }
 > = {
-  free: { label: "Free", color: "tier-free", rateLimit: 30 },
-  premium: { label: "Premium", color: "tier-premium", rateLimit: 100 },
-  analyst: { label: "Analyst", color: "tier-analyst", rateLimit: 300 },
-  admin: { label: "Admin", color: "tier-admin", rateLimit: 9999 },
+  [TIER.Free]: { label: "Free", color: "tier-free", rateLimit: 30 },
+  [TIER.Premium]: { label: "Premium", color: "tier-premium", rateLimit: 100 },
+  [TIER.Analyst]: { label: "Analyst", color: "tier-analyst", rateLimit: 300 },
+  [TIER.Admin]: { label: "Admin", color: "tier-admin", rateLimit: 9999 },
 };

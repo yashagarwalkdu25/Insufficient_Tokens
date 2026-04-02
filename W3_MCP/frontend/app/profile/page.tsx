@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Clock,
 } from "lucide-react";
+import { TIER } from "@/lib/constants";
 import { cn, tierBadge, TIER_CONFIG, type Tier } from "@/lib/utils";
 
 const SCOPE_LABELS: Record<string, string> = {
@@ -50,12 +51,12 @@ export default function ProfilePage() {
   }
 
   const user = session.user;
-  const tier = (user?.tier || "free") as Tier;
+  const tier = (user?.tier || TIER.Free) as Tier;
   const roles: string[] = user?.roles || [];
   const scopes: string[] = user?.scopes || [];
-  const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.free;
+  const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG[TIER.Free];
 
-  const allTiers: Tier[] = ["free", "premium", "analyst", "admin"];
+  const allTiers: Tier[] = [TIER.Free, TIER.Premium, TIER.Analyst, TIER.Admin];
   const currentTierIndex = allTiers.indexOf(tier);
 
   return (
@@ -112,7 +113,7 @@ export default function ProfilePage() {
           <h3 className="font-semibold flex items-center gap-2">
             <Layers className="h-4 w-4" /> Current Plan
           </h3>
-          {tier !== "admin" && tier !== "analyst" && (
+          {tier !== TIER.Admin && tier !== TIER.Analyst && (
             <Link
               href="/settings"
               className="flex items-center gap-1 text-xs text-primary hover:underline"
@@ -140,15 +141,15 @@ export default function ProfilePage() {
 
           {/* Visual Tier Indicator */}
           <div className="flex gap-1">
-            {allTiers.filter(t => t !== "admin").map((t, i) => (
+            {allTiers.filter((t) => t !== TIER.Admin).map((t, i) => (
               <div
                 key={t}
                 className={cn(
                   "h-2 flex-1 rounded-full transition-colors",
                   i <= currentTierIndex
-                    ? t === "free"
+                    ? t === TIER.Free
                       ? "bg-emerald-500"
-                      : t === "premium"
+                      : t === TIER.Premium
                       ? "bg-amber-500"
                       : "bg-purple-500"
                     : "bg-secondary"
@@ -157,7 +158,7 @@ export default function ProfilePage() {
             ))}
           </div>
           <div className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-wider">
-            {allTiers.filter(t => t !== "admin").map((t) => (
+            {allTiers.filter((t) => t !== TIER.Admin).map((t) => (
               <span key={t} className={cn(t === tier && "text-foreground font-medium")}>
                 {t}
               </span>
@@ -184,7 +185,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Locked Scopes */}
-        {tier !== "admin" && tier !== "analyst" && (
+        {tier !== TIER.Admin && tier !== TIER.Analyst && (
           <div className="pt-3 border-t border-border space-y-2">
             <p className="text-xs text-muted-foreground font-medium">Locked scopes (upgrade to unlock):</p>
             <div className="grid grid-cols-2 gap-2">

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { Search, TrendingUp, TrendingDown, AlertTriangle, FileText, Loader2, Lock, BarChart3, Zap, Crown } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS } from "@/lib/utils";
+import { MCP_CLIENT, TIER } from "@/lib/constants";
+import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS, type Tier } from "@/lib/utils";
 import { TrustScorePanel } from "@/components/trust-score-panel";
 
 interface QuoteData {
@@ -70,8 +71,8 @@ function extractSymbol(input: string): string | null {
 
 export default function ResearchPage() {
   const { data: session, status } = useSession();
-  const tier = (session?.tier as string) ?? "free";
-  const tierLevel = TIER_LEVELS[tier] ?? 0;
+  const tier = (session?.tier as string) ?? TIER.Free;
+  const tierLevel = TIER_LEVELS[tier as Tier] ?? 0;
 
   const [symbol, setSymbol] = useState("");
   const [loading, setLoading] = useState(false);
@@ -158,8 +159,8 @@ export default function ResearchPage() {
       setNews(((newsResult.data as Record<string, unknown>)?.articles as NewsArticle[]) || []);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("Upgrade your tier to access this tool.");
-      else if (msg === "UNAUTHORIZED") setError("Please sign in again — your session may have expired.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("Upgrade your tier to access this tool.");
+      else if (msg === MCP_CLIENT.Error.Unauthorized) setError("Please sign in again — your session may have expired.");
       else setError("Failed to fetch data. Check MCP server connection.");
     } finally {
       setLoading(false);
@@ -193,8 +194,8 @@ export default function ResearchPage() {
       }
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("Quick Analysis requires Premium tier or higher.");
-      else if (msg === "UNAUTHORIZED") setError("Please sign in again — your session may have expired.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("Quick Analysis requires Premium tier or higher.");
+      else if (msg === MCP_CLIENT.Error.Unauthorized) setError("Please sign in again — your session may have expired.");
       else setError("Failed to fetch fundamentals. " + msg);
     } finally {
       setLoadingPremium(false);
@@ -233,8 +234,8 @@ export default function ResearchPage() {
       });
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("Deep Dive requires Analyst tier.");
-      else if (msg === "UNAUTHORIZED") setError("Please sign in again — your session may have expired.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("Deep Dive requires Analyst tier.");
+      else if (msg === MCP_CLIENT.Error.Unauthorized) setError("Please sign in again — your session may have expired.");
       else setError("Failed to run deep dive analysis.");
     } finally {
       setLoadingAnalyst(false);
@@ -334,7 +335,7 @@ export default function ResearchPage() {
               <BarChart3 className="h-4 w-4 text-blue-400" /> Quick Analysis
             </h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium+</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium+</span>
               {tierLevel >= 1 ? (
                 <button onClick={handleQuickAnalysis} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-50">
                   {loadingPremium ? <Loader2 className="h-3 w-3 animate-spin" /> : "Run Quick Analysis"}
@@ -389,7 +390,7 @@ export default function ResearchPage() {
               <Zap className="h-4 w-4 text-purple-400" /> Deep Dive — Cross-Source Analysis
             </h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst Only</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst Only</span>
               {tierLevel >= 2 ? (
                 <button onClick={handleDeepDive} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
                   {loadingAnalyst ? <Loader2 className="h-3 w-3 animate-spin" /> : "Run Deep Dive"}

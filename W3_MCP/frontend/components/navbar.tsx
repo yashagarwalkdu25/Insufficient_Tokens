@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signIn, signOut } from "next-auth/react";
+import { KEYCLOAK_ROLE, TIER } from "@/lib/constants";
 import { cn, tierBadge } from "@/lib/utils";
 import {
   Search,
@@ -26,9 +27,9 @@ const tabs = [
 export function Navbar() {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const tier = session?.user?.tier ?? session?.tier ?? "free";
+  const tier = session?.user?.tier ?? session?.tier ?? TIER.Free;
   const roles: string[] = session?.user?.roles ?? [];
-  const isAdmin = roles.includes("admin");
+  const isAdmin = roles.includes(KEYCLOAK_ROLE.Admin);
 
   return (
     <nav className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
