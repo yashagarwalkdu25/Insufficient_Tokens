@@ -58,10 +58,10 @@ Run the full stack on one instance using **pre-built images** for `mcp-server` a
 
 1. **Laptop** — `docker login`, then build and push both images (`linux/amd64`) with the frontend `NEXT_PUBLIC_*` build-args pointing at `http://YOUR_PUBLIC_HOST:10004` and `:10003` (see step 2 below).
 2. **`.env` on the laptop** (you will copy this to EC2) — set at least:
-   - `W3_IMAGE_MCP=your-dockerhub-user/w3-mcp-server:latest`
-   - `W3_IMAGE_FRONTEND=your-dockerhub-user/w3-frontend:latest`
-   - `OAUTH_RESOURCE_URL=http://YOUR_PUBLIC_HOST:10004`
-   - `NEXT_PUBLIC_MCP_SERVER_URL`, `NEXT_PUBLIC_KEYCLOAK_URL`, `NEXTAUTH_URL` to the same public host (`http://YOUR_PUBLIC_HOST:10004` etc.) so server-side auth matches the browser.
+   - `DOCKERHUB_USER=your-dockerhub-user` (compose uses `your-dockerhub-user/w3-mcp-server:latest` and `.../w3-frontend:latest`)
+   - `W3_PUBLIC_HOST` — EC2 public IP or DNS (same value as `YOUR_PUBLIC_HOST` in the build commands below)
+   - `OAUTH_RESOURCE_URL`, `NEXT_PUBLIC_MCP_SERVER_URL`, `NEXT_PUBLIC_KEYCLOAK_URL`, and `NEXTAUTH_URL` using `http://${W3_PUBLIC_HOST}` with ports **10004**, **10003**, and **10005** respectively so the browser and OAuth agree
+   - For frontend image builds: after `set -a && . ./.env && set +a`, pass `--build-arg NEXT_PUBLIC_MCP_SERVER_URL=http://${W3_PUBLIC_HOST}:10004` and `--build-arg NEXT_PUBLIC_KEYCLOAK_URL=http://${W3_PUBLIC_HOST}:10003`
 3. **Laptop → EC2** — one `rsync` or `scp` of `docker-compose.ec2.yml`, `.env`, `keycloak/`, `db/` (no repo clone).
 4. **EC2** — `docker compose -f docker-compose.ec2.yml pull && docker compose -f docker-compose.ec2.yml up -d`.
 
@@ -93,6 +93,8 @@ docker buildx build --platform linux/amd64 -f frontend/Dockerfile \
 ```
 
 If `buildx` is unavailable: `docker build --platform linux/amd64 ...`, then `docker login` and `docker push` each tag.
+
+**Shortcut:** from `W3_MCP/`, after `docker login` and with `DOCKERHUB_USER` and `W3_PUBLIC_HOST` set in `.env`, run `./deploy-image.sh` (optional: `IMAGE_TAG=v1 PLATFORM=linux/amd64` — `docker-compose.ec2.yml` expects `:latest` unless you change image tags there).
 
 ### 3. Install Docker on EC2 (Amazon Linux 2023 example)
 

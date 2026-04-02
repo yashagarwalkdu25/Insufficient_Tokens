@@ -1,11 +1,11 @@
 # EC2 / registry deploy: pull pre-built mcp-server + frontend images (private GitHub is fine).
 # Use: docker compose -f docker-compose.ec2.yml up -d
-# Set W3_IMAGE_MCP, W3_IMAGE_FRONTEND, and public URLs in .env (see docs/DEPLOYMENT.md).
+# Set DOCKERHUB_USER and public URLs in .env (see docs/DEPLOYMENT.md).
 # Keep this file in sync with docker-compose.yml when service definitions change (except build → image).
 
 services:
   mcp-server:
-    image: ${W3_IMAGE_MCP}
+    image: ${DOCKERHUB_USER}/w3-mcp-server:latest
     ports: ["10004:10004"]
     env_file: .env
     depends_on:
@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${W3_IMAGE_FRONTEND}
+    image: ${DOCKERHUB_USER}/w3-frontend:latest
     ports: ["10005:10005"]
     depends_on:
       mcp-server:
