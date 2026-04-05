@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from ..server import mcp
 from ..data_facade.facade import data_facade
 
-# In-memory stores (mirrors portfolio tools store)
-# TODO: Wire to PostgreSQL
-_watchlists: dict[str, list[str]] = {}
-_research_cache: dict[str, dict] = {}
+from ..db import watchlist_repo
+from ..db import research_cache_repo
+
+from ..db import alerts_repo
 
 
 @mcp.resource("market://overview")
@@ -73,7 +74,9 @@ async def macro_snapshot() -> str:
 @mcp.resource("watchlist://{user_id}/stocks")
 async def user_watchlist(user_id: str) -> str:
     """User's personal stock watchlist."""
-    stocks = _watchlists.get(user_id, ["RELIANCE", "TCS", "HDFCBANK", "INFY"])
+    stocks = await watchlist_repo.get_watchlist(user_id)
+    if not stocks:
+        stocks = ["RELIANCE", "TCS", "HDFCBANK", "INFY"]
     return json.dumps({
         "user_id": user_id,
         "stocks": stocks,
@@ -85,9 +88,10 @@ async def user_watchlist(user_id: str) -> str:
 @mcp.resource("research://{ticker}/latest")
 async def latest_research(ticker: str) -> str:
     """Most recent cached cross-source research brief for a ticker."""
-    cached = _research_cache.get(ticker.upper())
+    cache_key = f"research:{ticker.upper()}"
+    cached = await research_cache_repo.get_cached(cache_key)
     if cached:
-        return json.dumps(cached)
+        return json.dumps(cached, default=str)
     return json.dumps({
         "ticker": ticker.upper(),
         "status": "no_research_cached",
@@ -100,7 +104,7 @@ async def latest_research(ticker: str) -> str:
 async def portfolio_holdings(user_id: str) -> str:
     """User's current portfolio holdings."""
     from ..tools.portfolio.tools import _get_holdings
-    holdings = _get_holdings(user_id)
+    holdings = await _get_holdings(user_id)
     return json.dumps({
         "user_id": user_id,
         "holdings": holdings,
@@ -119,7 +123,7 @@ async def portfolio_alerts(user_id: str) -> str:
     to detect new alerts.
     """
     from ..tools.portfolio.tools import _get_holdings
-    holdings = _get_holdings(user_id)
+    holdings = await _get_holdings(user_id)
     if not holdings:
         return json.dumps({
             "user_id": user_id,
@@ -179,7 +183,7 @@ async def portfolio_alerts(user_id: str) -> str:
 async def portfolio_risk_score(user_id: str) -> str:
     """Overall portfolio risk score (0-100), computed live from holdings."""
     from ..tools.portfolio.tools import _get_holdings
-    holdings = _get_holdings(user_id)
+    holdings = await _get_holdings(user_id)
     if not holdings:
         return json.dumps({
             "user_id": user_id,
@@ -255,3 +259,165 @@ async def filing_content(ticker: str, filing_id: str) -> str:
         "hint": "Use parse_quarterly_filing tool to extract structured data.",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
+
+
+# ---------------------------------------------------------------------------
+# Notification & Alert Resources
+# ---------------------------------------------------------------------------
+
+@mcp.resource("notifications://{user_id}/unread")
+async def unread_notifications(user_id: str) -> str:
+    """Unread notifications for a user — pollable subscription-style resource.
+
+    Clients can poll this resource to detect new triggered alerts,
+    price alerts, sentiment warnings, and earnings reminders.
+    """
+    notifs = await alerts_repo.get_notifications(user_id, unread_only=True, limit=20)
+    unread_count = await alerts_repo.get_unread_count(user_id)
+    for n in notifs:
+        if isinstance(n.get("created_at"), datetime):
+            n["created_at"] = n["created_at"].isoformat()
+    return json.dumps({
+        "user_id": user_id,
+        "unread_count": unread_count,
+        "notifications": notifs,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@mcp.resource("alerts://{user_id}/active")
+async def active_alerts_resource(user_id: str) -> str:
+    """Active alert rules for a user — price, risk, sentiment, earnings alerts."""
+    alerts = await alerts_repo.get_active_alerts(user_id)
+    for a in alerts:
+        for key in ("triggered_at", "created_at"):
+            if isinstance(a.get(key), datetime):
+                a[key] = a[key].isoformat()
+        if a.get("threshold") is not None:
+            a["threshold"] = float(a["threshold"])
+        if a.get("trigger_value") is not None:
+            a["trigger_value"] = float(a["trigger_value"])
+    return json.dumps({
+        "user_id": user_id,
+        "alerts": alerts,
+        "active_count": len([a for a in alerts if not a.get("is_triggered")]),
+        "triggered_count": len([a for a in alerts if a.get("is_triggered")]),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Resource Subscriptions (MCP spec bonus)
+# ---------------------------------------------------------------------------
+# MCP resource subscriptions allow clients to register interest in resources
+# and receive change notifications. We track subscriptions in-memory and
+# provide a tool for clients to subscribe/unsubscribe.
+
+_subscriptions: dict[str, set[str]] = {}  # user_id -> set of resource URIs
+
+
+@mcp.tool()
+async def subscribe_resource(
+    resource_uri: str,
+    user_id: str = "demo",
+) -> dict[str, Any]:
+    """Subscribe to change notifications for an MCP resource.
+
+    When subscribed, the resource data will be included in periodic
+    polling responses and morning briefs.
+
+    Subscribable resources:
+      - portfolio://{user_id}/alerts
+      - portfolio://{user_id}/risk_score
+      - notifications://{user_id}/unread
+      - market://overview
+      - macro://snapshot
+
+    Args:
+        resource_uri: The MCP resource URI to subscribe to.
+        user_id: User identifier (auto-injected from JWT).
+    """
+    user_subs = _subscriptions.setdefault(user_id, set())
+    user_subs.add(resource_uri)
+    return {
+        "data": {
+            "subscribed": resource_uri,
+            "total_subscriptions": len(user_subs),
+            "all_subscriptions": sorted(user_subs),
+        },
+        "source": "local",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@mcp.tool()
+async def unsubscribe_resource(
+    resource_uri: str,
+    user_id: str = "demo",
+) -> dict[str, Any]:
+    """Unsubscribe from change notifications for an MCP resource.
+
+    Args:
+        resource_uri: The MCP resource URI to unsubscribe from.
+        user_id: User identifier (auto-injected from JWT).
+    """
+    user_subs = _subscriptions.get(user_id, set())
+    user_subs.discard(resource_uri)
+    return {
+        "data": {
+            "unsubscribed": resource_uri,
+            "total_subscriptions": len(user_subs),
+            "all_subscriptions": sorted(user_subs),
+        },
+        "source": "local",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@mcp.tool()
+async def get_subscribed_updates(user_id: str = "demo") -> dict[str, Any]:
+    """Fetch latest data for all subscribed resources in a single call.
+
+    Returns a batch response with the current value of each resource
+    the user has subscribed to. Useful for periodic polling.
+
+    Args:
+        user_id: User identifier (auto-injected from JWT).
+    """
+    user_subs = _subscriptions.get(user_id, set())
+    if not user_subs:
+        return {
+            "data": {
+                "user_id": user_id,
+                "subscriptions": [],
+                "updates": {},
+                "hint": "Use subscribe_resource to watch resources.",
+            },
+            "source": "local",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    updates: dict[str, Any] = {}
+    for uri in sorted(user_subs):
+        try:
+            result = await mcp.read_resource(uri)
+            if hasattr(result, "contents") and result.contents:
+                content = result.contents[0]
+                if hasattr(content, "text"):
+                    updates[uri] = json.loads(content.text)
+                else:
+                    updates[uri] = str(content)
+            else:
+                updates[uri] = str(result)
+        except Exception as exc:
+            updates[uri] = {"error": str(exc)}
+
+    return {
+        "data": {
+            "user_id": user_id,
+            "subscriptions": sorted(user_subs),
+            "updates": updates,
+        },
+        "source": "local",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }

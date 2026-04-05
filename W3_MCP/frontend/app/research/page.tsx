@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
-import { Search, TrendingUp, TrendingDown, AlertTriangle, FileText, Loader2, Lock, BarChart3, Zap, Crown } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, AlertTriangle, FileText, Loader2, Lock, BarChart3, Zap, Crown, ShieldCheck, Activity } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
 import { MCP_CLIENT, TIER } from "@/lib/constants";
 import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS, type Tier } from "@/lib/utils";
@@ -44,6 +44,9 @@ interface FundamentalsData {
   eps: number | null;
   dividend_yield: number | null;
   revenue_growth: number | null;
+  sector?: string | null;
+  industry?: string | null;
+  notes?: string[];
   _source?: string;
 }
 
@@ -52,6 +55,7 @@ interface ShareholdingData {
   fii: number | null;
   dii: number | null;
   retail: number | null;
+  data_note?: string;
   _source?: string;
 }
 
@@ -90,6 +94,7 @@ export default function ResearchPage() {
   const [trustMeta, setTrustMeta] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
   const [source, setSource] = useState("");
+  const [newsSentiment, setNewsSentiment] = useState<Record<string, unknown> | null>(null);
 
   // --- AUTH GATE: require login (after all hooks) ---
   if (status === "loading") {
@@ -130,6 +135,7 @@ export default function ResearchPage() {
     setAnalysisSource("");
     setTrustMeta(null);
     setSource("");
+    setNewsSentiment(null);
   }
 
   // ─── FREE: Quote + News ─────────────────────────────────────────
@@ -155,8 +161,14 @@ export default function ResearchPage() {
       setQuote(quoteResult.data as unknown as QuoteData);
       setSource(quoteResult.source);
 
-      const newsResult = await callMCPTool("get_company_news", { symbol: ticker, days: 7 }, token);
+      const [newsResult, sentimentResult] = await Promise.all([
+        callMCPTool("get_company_news", { symbol: ticker, days: 7 }, token),
+        callMCPTool("get_news_sentiment", { symbol: ticker, days: 7 }, token).catch(() => null),
+      ]);
       setNews(((newsResult.data as Record<string, unknown>)?.articles as NewsArticle[]) || []);
+      if (sentimentResult) {
+        setNewsSentiment(sentimentResult.data as Record<string, unknown>);
+      }
     } catch (e: unknown) {
       const msg = (e as Error).message;
       if (msg === MCP_CLIENT.Error.Forbidden) setError("Upgrade your tier to access this tool.");
@@ -190,7 +202,17 @@ export default function ResearchPage() {
         const entries = (shareData?.entries as Record<string, unknown>[]) || [];
         if (entries.length > 0) {
           setShareholding(entries[0] as unknown as ShareholdingData);
+        } else {
+          setShareholding({
+            promoter: null, fii: null, dii: null, retail: null,
+            data_note: "No shareholding data returned from any source.",
+          });
         }
+      } else {
+        setShareholding({
+          promoter: null, fii: null, dii: null, retail: null,
+          data_note: "Shareholding data could not be fetched. Try BSE/NSE directly.",
+        });
       }
     } catch (e: unknown) {
       const msg = (e as Error).message;
@@ -310,10 +332,92 @@ export default function ResearchPage() {
         </div>
       )}
 
-      {/* News (Free) */}
+      {/* News + Sentiment (Free) */}
       {news.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-6">
-          <h3 className="font-semibold mb-3 flex items-center gap-2"><FileText className="h-4 w-4" /> Recent News</h3>
+        <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+          <h3 className="font-semibold flex items-center gap-2"><FileText className="h-4 w-4" /> Recent News</h3>
+
+          {/* Sentiment + Quality cards */}
+          {newsSentiment && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* Overall Sentiment */}
+              <div className="rounded-lg bg-secondary/50 p-3">
+                <p className="text-xs text-muted-foreground mb-1">Weighted Sentiment</p>
+                <p className={cn("text-xl font-bold font-mono", (newsSentiment.weighted_score as number) > 0.1 ? "text-emerald-400" : (newsSentiment.weighted_score as number) < -0.1 ? "text-red-400" : "text-muted-foreground")}>
+                  {(newsSentiment.weighted_score as number)?.toFixed(3) ?? "—"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {newsSentiment.positive_count as number} positive · {newsSentiment.negative_count as number} negative · {newsSentiment.neutral_count as number} neutral
+                </p>
+                <p className="text-xs mt-1">
+                  <span className="text-muted-foreground">Driver: </span>
+                  <span className="font-medium">{(newsSentiment.driver_type as string)?.replace("_", " ") ?? "—"}</span>
+                </p>
+              </div>
+
+              {/* Info Quality */}
+              {!!(newsSentiment.information_quality) && (
+                <div className="rounded-lg bg-secondary/50 p-3">
+                  <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Information Quality</p>
+                  <p className="text-xl font-bold font-mono">
+                    {((newsSentiment.information_quality as Record<string, unknown>).quality_score as number) ?? 0}<span className="text-sm text-muted-foreground font-normal">/100</span>
+                  </p>
+                  <div className="w-full bg-secondary rounded-full h-1.5 mt-2">
+                    <div className="bg-primary rounded-full h-1.5 transition-all" style={{ width: `${(newsSentiment.information_quality as Record<string, unknown>).quality_score as number}%` }} />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    {((newsSentiment.information_quality as Record<string, unknown>).explanation as string)?.split(".")[0]}
+                  </p>
+                </div>
+              )}
+
+              {/* Quality Dimensions */}
+              {!!((newsSentiment.information_quality as Record<string, unknown>)?.dimensions) && (
+                <div className="rounded-lg bg-secondary/50 p-3">
+                  <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1"><Activity className="h-3 w-3" /> Quality Dimensions</p>
+                  {Object.entries((newsSentiment.information_quality as Record<string, unknown>).dimensions as Record<string, number>).map(([dim, score]) => (
+                    <div key={dim} className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-muted-foreground capitalize">{dim.replace("_", " ")}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 bg-secondary rounded-full h-1">
+                          <div className="bg-primary/70 rounded-full h-1" style={{ width: `${(score / (dim === "volume" ? 15 : dim === "agreement" ? 25 : 30)) * 100}%` }} />
+                        </div>
+                        <span className="font-mono w-6 text-right">{score}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Source Breakdown Table */}
+          {newsSentiment && ((newsSentiment.source_breakdown as {source: string; article_count: number; avg_sentiment: number; credibility: number}[]) || []).length > 0 && (
+            <div className="rounded-lg border border-border overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-secondary/50">
+                  <tr>
+                    <th className="text-left p-2 font-medium">Source</th>
+                    <th className="text-right p-2 font-medium">Articles</th>
+                    <th className="text-right p-2 font-medium">Avg Sentiment</th>
+                    <th className="text-right p-2 font-medium">Credibility</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {((newsSentiment.source_breakdown as {source: string; article_count: number; avg_sentiment: number; credibility: number}[]) || []).map((s: {source: string; article_count: number; avg_sentiment: number; credibility: number}) => (
+                    <tr key={s.source} className="border-t border-border">
+                      <td className="p-2 font-medium capitalize">{s.source}</td>
+                      <td className="p-2 text-right text-muted-foreground">{s.article_count}</td>
+                      <td className={cn("p-2 text-right font-mono font-medium", s.avg_sentiment > 0.1 ? "text-emerald-400" : s.avg_sentiment < -0.1 ? "text-red-400" : "text-muted-foreground")}>{s.avg_sentiment.toFixed(3)}</td>
+                      <td className="p-2 text-right font-mono">{(s.credibility * 100).toFixed(0)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Article list */}
           <div className="space-y-3">
             {news.slice(0, 5).map((a: NewsArticle, i: number) => (
               <div key={i} className="text-sm border-b border-border pb-2 last:border-0">
@@ -353,15 +457,31 @@ export default function ResearchPage() {
           {/* Fundamentals */}
           {fundamentals && (
             <div className="space-y-2">
-              <p className="text-xs font-medium text-blue-300">Key Financial Ratios</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-blue-300">Key Financial Ratios</p>
+                {(fundamentals.sector || fundamentals.industry) && (
+                  <p className="text-xs text-muted-foreground">
+                    {fundamentals.sector}{fundamentals.industry ? ` · ${fundamentals.industry}` : ""}
+                  </p>
+                )}
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">P/E Ratio</span><p className="font-mono font-medium">{fundamentals.pe_ratio?.toFixed(1) ?? "—"}</p></div>
                 <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">P/B Ratio</span><p className="font-mono font-medium">{fundamentals.pb_ratio?.toFixed(1) ?? "—"}</p></div>
-                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">ROE</span><p className="font-mono font-medium">{fundamentals.roe ? `${(fundamentals.roe < 1 ? fundamentals.roe * 100 : fundamentals.roe).toFixed(1)}%` : "—"}</p></div>
+                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">ROE</span><p className="font-mono font-medium">{fundamentals.roe != null ? `${(Math.abs(fundamentals.roe) < 1 ? fundamentals.roe * 100 : fundamentals.roe).toFixed(1)}%` : "—"}</p></div>
                 <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">Debt/Equity</span><p className="font-mono font-medium">{fundamentals.debt_to_equity?.toFixed(2) ?? "—"}</p></div>
-                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">EPS</span><p className="font-mono font-medium">{fundamentals.eps ? `₹${fundamentals.eps.toFixed(1)}` : "—"}</p></div>
-                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">Div Yield</span><p className="font-mono font-medium">{fundamentals.dividend_yield ? `${(fundamentals.dividend_yield < 1 ? fundamentals.dividend_yield * 100 : fundamentals.dividend_yield).toFixed(2)}%` : "—"}</p></div>
+                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">EPS</span><p className={cn("font-mono font-medium", fundamentals.eps != null && fundamentals.eps < 0 ? "text-red-400" : "")}>{fundamentals.eps != null ? `₹${fundamentals.eps.toFixed(1)}` : "—"}</p></div>
+                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">Div Yield</span><p className="font-mono font-medium">{fundamentals.dividend_yield != null ? `${(Math.abs(fundamentals.dividend_yield) < 1 ? fundamentals.dividend_yield * 100 : fundamentals.dividend_yield).toFixed(2)}%` : "—"}</p></div>
               </div>
+              {fundamentals.notes && fundamentals.notes.length > 0 && (
+                <div className="rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 space-y-0.5">
+                  {fundamentals.notes.map((note: string, i: number) => (
+                    <p key={i} className="text-xs text-amber-300/90 flex items-start gap-1.5">
+                      <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" /> {note}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -369,12 +489,35 @@ export default function ResearchPage() {
           {shareholding && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-blue-300">Shareholding Pattern</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">Promoter</span><p className="font-mono font-medium">{shareholding.promoter ? `${shareholding.promoter.toFixed(1)}%` : "—"}</p></div>
-                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">FII</span><p className="font-mono font-medium">{shareholding.fii ? `${shareholding.fii.toFixed(1)}%` : "—"}</p></div>
-                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">DII</span><p className="font-mono font-medium">{shareholding.dii ? `${shareholding.dii.toFixed(1)}%` : "—"}</p></div>
-                <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">Public/Retail</span><p className="font-mono font-medium">{shareholding.retail ? `${shareholding.retail.toFixed(1)}%` : "—"}</p></div>
-              </div>
+              {shareholding.promoter != null || shareholding.fii != null ? (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">Promoter</span><p className="font-mono font-medium">{shareholding.promoter != null ? `${shareholding.promoter.toFixed(1)}%` : "—"}</p></div>
+                    <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">FII</span><p className="font-mono font-medium">{shareholding.fii != null ? `${shareholding.fii.toFixed(1)}%` : "—"}</p></div>
+                    <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">DII</span><p className="font-mono font-medium">{shareholding.dii != null ? `${shareholding.dii.toFixed(1)}%` : "—"}</p></div>
+                    <div className="p-2 rounded-lg bg-secondary/50"><span className="text-muted-foreground text-xs">Public/Retail</span><p className="font-mono font-medium">{shareholding.retail != null ? `${shareholding.retail.toFixed(1)}%` : "—"}</p></div>
+                  </div>
+                  {/* Stacked bar for visual representation */}
+                  {shareholding.promoter != null && (
+                    <div className="w-full h-3 rounded-full overflow-hidden flex bg-secondary/30">
+                      {shareholding.promoter > 0 && <div className="bg-blue-500 h-full" style={{ width: `${shareholding.promoter}%` }} title={`Promoter ${shareholding.promoter.toFixed(1)}%`} />}
+                      {(shareholding.fii ?? 0) > 0 && <div className="bg-emerald-500 h-full" style={{ width: `${shareholding.fii}%` }} title={`FII ${shareholding.fii?.toFixed(1)}%`} />}
+                      {(shareholding.dii ?? 0) > 0 && <div className="bg-amber-500 h-full" style={{ width: `${shareholding.dii}%` }} title={`DII ${shareholding.dii?.toFixed(1)}%`} />}
+                      {(shareholding.retail ?? 0) > 0 && <div className="bg-purple-500/50 h-full" style={{ width: `${shareholding.retail}%` }} title={`Retail ${shareholding.retail?.toFixed(1)}%`} />}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-md bg-secondary/30 border border-border px-3 py-3 text-center">
+                  <p className="text-sm text-muted-foreground">Shareholding data not available for this stock</p>
+                  {shareholding.data_note && (
+                    <p className="text-xs text-muted-foreground/70 mt-1">{shareholding.data_note}</p>
+                  )}
+                  <p className="text-xs text-blue-400 mt-2">
+                    Check <a href={`https://www.bseindia.com/stock-share-price/company/${quote?.symbol || ""}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-300">BSE India</a> or <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${quote?.symbol || ""}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-300">NSE India</a> for official data
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

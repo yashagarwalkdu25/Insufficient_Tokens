@@ -141,14 +141,22 @@ async def get_earnings_calendar(
     now = datetime.now(timezone.utc)
     enriched: list[dict[str, Any]] = []
 
+    seen_symbols: set[str] = set()
+
     for entry in raw_entries:
         sym = (entry.get("symbol") or "").strip().upper()
-        # Strip .NS / .BO suffix if present
         if sym.endswith(".NS") or sym.endswith(".BO"):
             sym = sym[:-3]
+        if not sym:
+            continue
+
+        origin = entry.get("_origin", "")
+        is_from_bse = origin == "bse"
+
+        # BSE entries are always Indian
+        is_indian = is_from_bse or sym in _INDIAN_SYMBOLS or isin_mapper.resolve(sym) is not None
 
         # Filter logic
-        is_indian = sym in _INDIAN_SYMBOLS or isin_mapper.resolve(sym) is not None
         if filter == "india" and not is_indian:
             continue
         if filter == "nifty50" and sym not in nifty50_set:
@@ -156,12 +164,17 @@ async def get_earnings_calendar(
         if filter == "portfolio" and sym not in portfolio_set:
             continue
 
+        # Deduplicate: prefer BSE data for Indian stocks
+        if sym in seen_symbols:
+            continue
+        seen_symbols.add(sym)
+
         # Enrich with company name, sector, exchange
         mapping = isin_mapper.resolve(sym)
-        company_name = mapping.company_name if mapping else ""
+        company_name = entry.get("company_name") or (mapping.company_name if mapping else "")
         sector = mapping.sector if mapping else ""
-        exchange = "NSE" if mapping else ("NSE" if is_indian else "")
-        bse_code = mapping.bse_scrip_code if mapping else ""
+        exchange = entry.get("exchange") or ("NSE" if mapping or is_indian else "")
+        bse_code = entry.get("scrip_code") or (mapping.bse_scrip_code if mapping else "")
 
         # Parse date and compute countdown
         raw_date = entry.get("date") or entry.get("expected_date") or ""
@@ -206,6 +219,7 @@ async def get_earnings_calendar(
             "revenue_estimate": entry.get("revenueEstimate"),
             "in_portfolio": sym in portfolio_set,
             "is_nifty50": sym in nifty50_set,
+            "data_source": "BSE" if is_from_bse else "Finnhub",
             "verify_links": {
                 "nse": nse_url,
                 "bse": bse_url,
@@ -626,13 +640,33 @@ async def earnings_verdict(symbol: str) -> dict[str, Any]:
 
     # Fallback: rich cross-source heuristic
     logger.info("earnings_verdict.fallback_heuristic", symbol=symbol)
+
+    # Resolve symbol to NSE-suffixed ticker for yfinance
+    mapping = isin_mapper.resolve(symbol)
+    yf_symbol = mapping.nse_symbol if mapping else symbol
+
     fundamentals = await data_facade.get_fundamentals(symbol)
     quote = await data_facade.get_price(symbol)
-    news = await data_facade.get_news(symbol, days=3)
+    news = await data_facade.get_news(symbol, days=7)
     shareholding = await data_facade.get_shareholding(symbol, quarters=2)
-    eps_data = await _get_quarterly_eps(symbol)
+    eps_data = await _get_quarterly_eps(yf_symbol)
 
-    actual_eps = fundamentals.get("eps")
+    # Log which sources succeeded/failed for debugging
+    fund_ok = "error" not in fundamentals
+    quote_ok = "error" not in quote
+    news_ok = "error" not in news
+    sh_ok = "error" not in shareholding
+    logger.info(
+        "earnings_verdict.source_status",
+        symbol=symbol,
+        fundamentals=fund_ok,
+        quote=quote_ok,
+        news=news_ok,
+        shareholding=sh_ok,
+        eps_quarters=len(eps_data),
+    )
+
+    actual_eps = fundamentals.get("eps") if fund_ok else None
     expected_eps = None
     if len(eps_data) >= 5:
         year_ago = eps_data[-5].get("eps")
@@ -641,64 +675,125 @@ async def earnings_verdict(symbol: str) -> dict[str, Any]:
         if year_ago:
             expected_eps = round(year_ago * (1 + avg_g / 100), 2)
     surprise_pct = round((actual_eps - expected_eps) / abs(expected_eps) * 100, 2) if actual_eps and expected_eps and expected_eps != 0 else 0
-    verdict = "beat" if surprise_pct > 5 else ("miss" if surprise_pct < -5 else "inline")
+    verdict_label = "beat" if surprise_pct > 5 else ("miss" if surprise_pct < -5 else "inline")
 
     # Shareholding FII change
-    entries = shareholding.get("entries", shareholding.get("data", {}).get("entries", []))
+    sh_entries = []
+    if sh_ok:
+        sh_entries = shareholding.get("entries", shareholding.get("data", {}).get("entries", []))
     fii_change = None
-    if len(entries) >= 2 and isinstance(entries[-1], dict) and isinstance(entries[-2], dict):
-        fii_change = round(entries[-1].get("fii", 0) - entries[-2].get("fii", 0), 2)
+    if len(sh_entries) >= 2 and isinstance(sh_entries[-1], dict) and isinstance(sh_entries[-2], dict):
+        fii_change = round(sh_entries[-1].get("fii", 0) - sh_entries[-2].get("fii", 0), 2)
 
-    # News sentiment
-    articles = news.get("articles", news.get("data", []))
-    count = max(len(articles), 1)
-    pos = sum(1 for a in articles if isinstance(a, dict) and (a.get("sentiment_score") or 0) > 0.2)
-    neg = sum(1 for a in articles if isinstance(a, dict) and (a.get("sentiment_score") or 0) < -0.2)
-    sentiment = round((pos - neg) / count, 3)
+    # News sentiment — handle both finnhub (has sentiment_score) and gnews (no score)
+    articles: list[dict[str, Any]] = []
+    if news_ok:
+        articles = news.get("articles", news.get("data", []))
+    article_count = len(articles)
 
-    change_pct = quote.get("change_pct", 0)
+    # If articles lack sentiment_score, approximate from headline keywords
+    sentiment = 0.0
+    if article_count > 0:
+        pos = neg = 0
+        for a in articles:
+            if not isinstance(a, dict):
+                continue
+            score = a.get("sentiment_score")
+            if score is not None:
+                if float(score) > 0.2:
+                    pos += 1
+                elif float(score) < -0.2:
+                    neg += 1
+            else:
+                text = (a.get("headline") or a.get("title") or "").lower()
+                if any(w in text for w in ("beat", "surge", "profit", "growth", "rally", "strong", "record")):
+                    pos += 1
+                elif any(w in text for w in ("miss", "decline", "loss", "fall", "drop", "weak", "slump")):
+                    neg += 1
+        sentiment = round((pos - neg) / max(article_count, 1), 3)
+
+    change_pct = quote.get("change_pct", 0) if quote_ok else 0
+    try:
+        change_pct = float(change_pct or 0)
+    except (TypeError, ValueError):
+        change_pct = 0.0
     price_dir = "rose" if change_pct > 0 else "fell"
+    ltp = quote.get("ltp") if quote_ok else None
 
     # Build narrative
-    narrative_parts = [
-        f"{symbol} reported EPS of ₹{actual_eps or 'N/A'}",
-    ]
-    if expected_eps:
-        narrative_parts[0] += f" vs estimated ₹{expected_eps} ({verdict}, {surprise_pct:+.1f}% surprise)"
-    narrative_parts.append(
-        f"[NSE]. Stock {price_dir} {abs(change_pct):.1f}% on results day."
-    )
+    narrative_parts: list[str] = []
+    if actual_eps is not None:
+        part = f"{symbol} reported EPS of ₹{actual_eps}"
+        if expected_eps:
+            part += f" vs estimated ₹{expected_eps} ({verdict_label}, {surprise_pct:+.1f}% surprise)"
+        narrative_parts.append(part)
+    else:
+        narrative_parts.append(f"{symbol} earnings data is being aggregated from available sources")
+
+    if quote_ok and ltp:
+        narrative_parts.append(
+            f"[NSE]. Stock {price_dir} {abs(change_pct):.1f}% on results day. LTP ₹{ltp}."
+        )
+
     if fii_change is not None:
         narrative_parts.append(
             f"FII holding {'increased' if fii_change > 0 else 'decreased'} {abs(fii_change):.1f}pp in prior quarter [shareholding data]."
         )
-    narrative_parts.append(
-        f"News sentiment: {'positive' if sentiment > 0.1 else ('negative' if sentiment < -0.1 else 'neutral')} ({sentiment:+.2f}) from {len(articles)} articles [news feed]."
-    )
+
+    if article_count > 0:
+        sentiment_label = "positive" if sentiment > 0.1 else ("negative" if sentiment < -0.1 else "neutral")
+        narrative_parts.append(
+            f"News sentiment: {sentiment_label} ({sentiment:+.2f}) from {article_count} articles [news feed]."
+        )
+    else:
+        narrative_parts.append("No recent news articles found for sentiment analysis.")
 
     # Detect contradictions
-    contradictions = []
-    if verdict == "beat" and change_pct < -1:
+    contradictions: list[str] = []
+    if verdict_label == "beat" and change_pct < -1:
         contradictions.append("Earnings beat but stock fell — sell-off may be pre-positioned or guidance-driven.")
-    if verdict == "miss" and change_pct > 1:
+    if verdict_label == "miss" and change_pct > 1:
         contradictions.append("Earnings miss but stock rose — expectations may have been already priced in.")
-    if fii_change is not None and fii_change < -1 and verdict == "beat":
+    if fii_change is not None and fii_change < -1 and verdict_label == "beat":
         contradictions.append("FII reduced holdings before a beat — possible profit booking ahead of results.")
+
+    # Build citations with data availability notes
+    citations: list[dict[str, Any]] = []
+    if fund_ok and actual_eps is not None:
+        citations.append({"source": "yfinance", "data_point": f"EPS ₹{actual_eps}", "value": str(actual_eps)})
+    else:
+        citations.append({"source": "yfinance", "data_point": "EPS data unavailable — check symbol or try later"})
+
+    if quote_ok and ltp:
+        citations.append({"source": quote.get("_source", "NSE"), "data_point": f"Price ₹{ltp} ({change_pct:+.1f}%)", "value": str(ltp)})
+    else:
+        citations.append({"source": "NSE", "data_point": "Price data unavailable"})
+
+    if fii_change is not None:
+        citations.append({"source": "shareholding", "data_point": f"FII change {fii_change:+.1f}pp"})
+    else:
+        citations.append({"source": "shareholding", "data_point": "FII data unavailable"})
+
+    news_source = news.get("_source", "news feed") if news_ok else "news feed"
+    if article_count > 0:
+        citations.append({"source": news_source, "data_point": f"Sentiment {sentiment:+.2f} from {article_count} articles"})
+    else:
+        citations.append({"source": news_source, "data_point": "No recent articles found"})
 
     ev_data: dict[str, Any] = {
         "symbol": symbol,
         "quarter": "latest",
-        "beat_miss": verdict,
+        "beat_miss": verdict_label,
         "surprise_pct": surprise_pct,
         "filing_highlights": {
             "eps": actual_eps,
             "expected_eps": expected_eps,
-            "revenue": fundamentals.get("revenue"),
-            "pe_ratio": fundamentals.get("pe_ratio"),
+            "revenue": fundamentals.get("revenue") if fund_ok else None,
+            "pe_ratio": fundamentals.get("pe_ratio") if fund_ok else None,
         },
         "market_reaction": {
             "price_change_pct": change_pct,
-            "price": quote.get("ltp"),
+            "price": ltp,
         },
         "shareholding_signal": {
             "fii_change_pp": fii_change,
@@ -706,12 +801,7 @@ async def earnings_verdict(symbol: str) -> dict[str, Any]:
         "sentiment_score": sentiment,
         "contradictions": contradictions,
         "narrative": " ".join(narrative_parts),
-        "citations": [
-            {"source": "yfinance", "data_point": f"EPS ₹{actual_eps}", "value": str(actual_eps)},
-            {"source": quote.get("_source", "NSE"), "data_point": f"Price ₹{quote.get('ltp')} ({change_pct:+.1f}%)", "value": str(quote.get("ltp"))},
-            {"source": "shareholding", "data_point": f"FII change {fii_change:+.1f}pp" if fii_change else "FII data unavailable"},
-            {"source": news.get("_source", "news feed"), "data_point": f"Sentiment {sentiment:+.2f} from {len(articles)} articles"},
-        ],
+        "citations": citations,
     }
     _attach_trust_earnings(ev_data)
 
@@ -735,25 +825,44 @@ async def earnings_season_dashboard(week_date: str = "") -> dict[str, Any]:
     Args:
         week_date: Week date in YYYY-MM-DD format (empty = current week).
     """
-    calendar = await data_facade.get_earnings_calendar(weeks=2)
+    calendar = await data_facade.get_earnings_calendar(weeks=4)
     entries = calendar.get("earnings", calendar.get("data", []))
 
-    # Nifty 50 major companies for demo — aggregate their data
-    demo_companies = ["TCS", "INFY", "HDFCBANK", "RELIANCE", "ICICIBANK",
-                      "WIPRO", "HCLTECH", "SBIN", "BHARTIARTL", "ITC"]
+    # Extract unique symbols from the real calendar (Indian stocks only)
+    calendar_symbols: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        sym = (entry.get("symbol") or "").strip().upper()
+        if sym.endswith(".NS") or sym.endswith(".BO"):
+            sym = sym[:-3]
+        if not sym or sym in seen:
+            continue
+        is_indian = sym in _INDIAN_SYMBOLS or isin_mapper.resolve(sym) is not None
+        if is_indian:
+            seen.add(sym)
+            calendar_symbols.append(sym)
+
+    # Cap at 30 to avoid excessive API calls
+    analyse_symbols = calendar_symbols[:30]
+
     beats = misses = inlines = 0
+    analysed = 0
     sector_data: dict[str, dict[str, int]] = {}
     notable: list[dict[str, Any]] = []
 
-    for sym in demo_companies:
+    for sym in analyse_symbols:
         try:
             fund = await data_facade.get_fundamentals(sym)
-            eps = fund.get("eps")
+            if "error" in fund:
+                continue
             sector = fund.get("sector") or "Unknown"
             if sector not in sector_data:
                 sector_data[sector] = {"beats": 0, "misses": 0, "inlines": 0}
 
             eps_data = await _get_quarterly_eps(sym)
+            if not eps_data:
+                continue
+            analysed += 1
             yoy_vals = [q["yoy_pct"] for q in eps_data if q.get("yoy_pct") is not None]
             avg_g = sum(yoy_vals) / len(yoy_vals) if yoy_vals else 0
 
@@ -761,22 +870,23 @@ async def earnings_season_dashboard(week_date: str = "") -> dict[str, Any]:
                 beats += 1
                 sector_data[sector]["beats"] += 1
                 if avg_g > 15:
-                    notable.append({"symbol": sym, "type": "positive_surprise", "yoy_growth_pct": avg_g})
+                    notable.append({"symbol": sym, "type": "positive_surprise", "yoy_growth_pct": round(avg_g, 1)})
             elif avg_g < -5:
                 misses += 1
                 sector_data[sector]["misses"] += 1
                 if avg_g < -15:
-                    notable.append({"symbol": sym, "type": "negative_surprise", "yoy_growth_pct": avg_g})
+                    notable.append({"symbol": sym, "type": "negative_surprise", "yoy_growth_pct": round(avg_g, 1)})
             else:
                 inlines += 1
                 sector_data[sector]["inlines"] += 1
-        except Exception:
+        except Exception as exc:
+            logger.warning("season_dashboard.symbol_error", symbol=sym, error=str(exc))
             continue
 
     return {
         "data": {
             "week_date": week_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "companies_analysed": len(demo_companies),
+            "companies_analysed": analysed,
             "beats": beats,
             "misses": misses,
             "inlines": inlines,

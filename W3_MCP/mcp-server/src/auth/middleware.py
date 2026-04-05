@@ -21,6 +21,7 @@ from ..config.constants import (
     SCOPE_WATCHLIST_READ,
     SCOPE_WATCHLIST_WRITE,
     SCOPE_PORTFOLIO_READ,
+    SCOPE_PORTFOLIO_WRITE,
 )
 
 logger = structlog.get_logger(__name__)
@@ -79,6 +80,22 @@ TOOL_SCOPE_MAP: dict[str, ToolScopeSpec] = {
     "earnings_verdict": SCOPE_RESEARCH_GENERATE,
     "earnings_season_dashboard": SCOPE_RESEARCH_GENERATE,
     "compare_quarterly_performance": SCOPE_RESEARCH_GENERATE,
+    # -- Alert & Notification tools ----------------------------------------
+    "create_price_alert": SCOPE_WATCHLIST_WRITE,
+    "create_portfolio_risk_alert": SCOPE_PORTFOLIO_READ,
+    "create_sentiment_alert": SCOPE_PORTFOLIO_READ,
+    "create_earnings_reminder": SCOPE_WATCHLIST_WRITE,
+    "get_my_alerts": SCOPE_WATCHLIST_READ,
+    "delete_alert": SCOPE_WATCHLIST_WRITE,
+    "get_notifications": SCOPE_WATCHLIST_READ,
+    "mark_notifications_read": SCOPE_WATCHLIST_WRITE,
+    "check_and_trigger_alerts": SCOPE_PORTFOLIO_READ,
+    # -- Morning brief & advanced tools ------------------------------------
+    "generate_morning_brief": SCOPE_PORTFOLIO_READ,
+    # -- Resource subscription tools ---------------------------------------
+    "subscribe_resource": SCOPE_WATCHLIST_WRITE,
+    "unsubscribe_resource": SCOPE_WATCHLIST_WRITE,
+    "get_subscribed_updates": SCOPE_WATCHLIST_READ,
 }
 
 

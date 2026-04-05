@@ -25,6 +25,7 @@ from .auth.middleware import TierToolFilter, TOOL_SCOPE_MAP, tool_scope_specs
 from .auth.mcp_keycloak import KeycloakMCPVerifier, finint_component_auth
 from .auth.rate_limiter import RateLimiter
 from .auth.audit import AuditLogger
+from .db.pool import get_pool, close_pool
 
 _auth_provider = KeycloakAuthProvider()
 _tier_filter = TierToolFilter()
@@ -369,6 +370,13 @@ async def rest_tool_bridge(request: Request) -> JSONResponse:
         "portfolio_health_check", "check_concentration_risk", "check_mf_overlap",
         "check_macro_sensitivity", "detect_sentiment_shift", "portfolio_risk_report",
         "what_if_analysis", "import_portfolio",
+        # Alert & notification tools
+        "create_price_alert", "create_portfolio_risk_alert", "create_sentiment_alert",
+        "create_earnings_reminder", "get_my_alerts", "delete_alert",
+        "get_notifications", "mark_notifications_read", "check_and_trigger_alerts",
+        "generate_morning_brief",
+        # Resource subscription tools
+        "subscribe_resource", "unsubscribe_resource", "get_subscribed_updates",
     }
     if isinstance(body, dict) and tool_name in _PORTFOLIO_TOOLS:
         body["user_id"] = claims.user_id
@@ -465,6 +473,8 @@ def _register_tools() -> None:
     from .tools.portfolio import tools as _portfolio  # noqa: F401
     from .tools.earnings import tools as _earnings  # noqa: F401
     from .tools.cross_source import tools as _cross  # noqa: F401
+    from .tools.alerts import tools as _alerts  # noqa: F401
+    from .tools.alerts import morning_brief as _morning  # noqa: F401
     from .resources import resources as _resources  # noqa: F401
     from .prompts import prompts as _prompts  # noqa: F401
 
@@ -494,7 +504,46 @@ cors_middleware = [
     )
 ]
 
-app = mcp.http_app(path="/mcp", middleware=cors_middleware)
+_mcp_app = mcp.http_app(path="/mcp", middleware=cors_middleware)
+
+
+# ---------------------------------------------------------------------------
+# ASGI wrapper — DB pool lifecycle (lazy init + graceful shutdown)
+# ---------------------------------------------------------------------------
+
+_db_initialised = False
+
+
+async def app(scope, receive, send):  # type: ignore[no-untyped-def]
+    """Thin ASGI wrapper that ensures the DB pool is ready before requests."""
+    global _db_initialised
+    if scope["type"] == "lifespan":
+        # Delegate lifespan to the MCP app, but hook our startup/shutdown
+        async def _wrapped_receive():
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                try:
+                    await get_pool()
+                    log.info("db_pool_initialised")
+                except Exception as exc:
+                    log.error("db_pool_init_failed", error=str(exc))
+            return message
+
+        async def _wrapped_send(message):
+            if message["type"] == "lifespan.shutdown.complete":
+                await close_pool()
+                log.info("db_pool_closed")
+            await send(message)
+
+        await _mcp_app(scope, _wrapped_receive, _wrapped_send)
+    else:
+        if not _db_initialised:
+            _db_initialised = True
+            try:
+                await get_pool()
+            except Exception:
+                pass
+        await _mcp_app(scope, receive, send)
 
 
 # ---------------------------------------------------------------------------

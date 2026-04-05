@@ -1,4 +1,7 @@
-"""PS2 Risk Crew — 4-agent sequential pipeline for portfolio risk analysis."""
+"""PS2 Risk Crew — 4-agent parallel pipeline for portfolio risk analysis.
+
+Architecture: 3 data-gathering agents run IN PARALLEL (async_execution=True),
+then a narrator agent runs sequentially to synthesise all findings."""
 from __future__ import annotations
 
 import asyncio
@@ -143,34 +146,59 @@ def _build_risk_crew(holdings: list[dict[str, Any]], user_id: str) -> Crew:
     narrator = Agent(
         role="Risk Narrator",
         goal="Produce a structured PortfolioRiskReport with citations",
-        backstory="Synthesises scanner, risk, and macro outputs into a risk narrative.",
+        backstory=(
+            "Synthesises scanner, risk, and macro outputs into a risk narrative "
+            "for Indian equities. ALWAYS use ₹ (Indian Rupee) for currency, never $. "
+            "Reference NSE/BSE exchanges, not NYSE. Use Indian market terminology."
+        ),
         llm=llm_reasoning,
         memory=True, max_iter=10, allow_delegation=False, verbose=False,
     )
 
+    # Tasks — first 3 run IN PARALLEL (async_execution=True)
     scan_task = Task(
         description=f"Fetch current prices for: {symbols_str}. Calculate P&L for each.",
         expected_output="JSON with per-stock current prices and P&L.",
         agent=scanner,
+        async_execution=True,
     )
 
     risk_task = Task(
         description="Check concentration risk (>20% single stock, >40% sector). Check news sentiment for top holdings.",
         expected_output="JSON with risk flags and sentiment scores.",
         agent=risk_detector,
+        async_execution=True,
     )
 
     macro_task = Task(
         description="Get macro data and assess how repo rate, CPI, USD/INR affect this portfolio.",
         expected_output="JSON with macro impacts per sector.",
         agent=macro_mapper,
+        async_execution=True,
     )
 
+    # Narrative task: runs AFTER all parallel tasks complete
     narrative_task = Task(
-        description=f"Synthesise all findings into a PortfolioRiskReport for user {user_id}.",
-        expected_output="Complete PortfolioRiskReport with alerts, narrative, citations.",
+        description=(
+            f"Synthesise all findings into a PortfolioRiskReport for user {user_id}. "
+            "This is an Indian equities portfolio traded on NSE/BSE. "
+            "Use ₹ (Indian Rupee) for all currency values. Never use $.\n"
+            "CRITICAL — signals array: include EXACTLY 4 objects with these signal_type "
+            "strings (spell them exactly): "
+            "sector_concentration, mf_overlap, macro_sensitivity, sentiment_shift. "
+            "Each must have source, direction (-1 to 1), confidence (0-1), evidence. "
+            "Derive sector_concentration and mf_overlap from holdings weights and sectors; "
+            "macro_sensitivity from RBI/repo/CPI/FX vs sectors held; "
+            "sentiment_shift from news sentiment across top holdings."
+        ),
+        expected_output=(
+            "PortfolioRiskReport: alerts, narrative, citations, recommendations, and "
+            "signals[4] with signal_type sector_concentration, mf_overlap, "
+            "macro_sensitivity, sentiment_shift only. Currency in ₹."
+        ),
         agent=narrator,
         output_pydantic=PortfolioRiskReportOutput,
+        context=[scan_task, risk_task, macro_task],
     )
 
     return Crew(
@@ -178,6 +206,7 @@ def _build_risk_crew(holdings: list[dict[str, Any]], user_id: str) -> Crew:
         tasks=[scan_task, risk_task, macro_task, narrative_task],
         process=Process.sequential,
         memory=True, verbose=False,
+        planning=True,
     )
 
 
@@ -188,6 +217,7 @@ def _build_risk_crew(holdings: list[dict[str, Any]], user_id: str) -> Crew:
 async def run_risk_crew(holdings: list[dict[str, Any]], user_id: str = "demo") -> dict[str, Any]:
     """Execute the risk crew and return a structured risk report."""
     from ..config.settings import settings
+    from ..db import research_cache_repo
 
     if not settings.openai_api_key:
         return {"error": "OPENAI_API_KEY not configured", "user_id": user_id}
@@ -195,14 +225,29 @@ async def run_risk_crew(holdings: list[dict[str, Any]], user_id: str = "demo") -
     if not holdings:
         return {"error": "No holdings to analyse", "user_id": user_id}
 
+    # Check cache (key = sorted symbols hash, TTL = 30 min)
+    symbols_key = ",".join(sorted(h["symbol"] for h in holdings))
+    cache_key = f"risk:{user_id}:{symbols_key}"
+    cached = await research_cache_repo.get_cached(cache_key)
+    if cached is not None:
+        logger.info("risk_crew.cache_hit", user_id=user_id)
+        cached["_cache"] = "hit"
+        return cached
+
     try:
         os.environ["OPENAI_API_KEY"] = settings.openai_api_key
         crew = _build_risk_crew(holdings, user_id)
         result = await asyncio.to_thread(crew.kickoff)
 
         if hasattr(result, "pydantic") and result.pydantic:
-            return result.pydantic.model_dump()
-        return {"raw": str(result), "user_id": user_id}
+            output = result.pydantic.model_dump()
+        else:
+            output = {"raw": str(result), "user_id": user_id}
+
+        await research_cache_repo.set_cached(
+            cache_key, "risk", output, ttl_seconds=1800, user_id=user_id,
+        )
+        return output
 
     except Exception as exc:
         logger.error("risk_crew.failed", user_id=user_id, error=str(exc))

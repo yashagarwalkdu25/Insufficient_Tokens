@@ -1,13 +1,27 @@
 """Deterministic trust score from evidence matrix and conflicts (no LLM).
 
-Penalty uses len(conflicts) plus per-matrix-row contradicted count (intra-source
-disagreement); narrative strings are already folded into conflicts.
+Penalties use structured cross-topic conflicts plus matrix contradictions.
+LLM narrative strings appended as topic=narrative* are shown in the UI but do
+not reduce the score (they often say \"no contradictions\", which is not a
+data conflict).
+
+Weakly_supported rows (single source per dimension) get partial credit so
+aligned single-source research is not stuck at baseline minus false penalties.
 """
 from __future__ import annotations
 
 from typing import Any
 
-# Scoring uses matrix row statuses + len(conflicts); narrative strings add conflicts only (no double -12 for same row).
+
+def _scoring_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Exclude narrative bullets — those are summaries, not detected conflicts."""
+    out: list[dict[str, Any]] = []
+    for c in conflicts:
+        topic = str(c.get("topic") or "")
+        if topic.startswith("narrative"):
+            continue
+        out.append(c)
+    return out
 
 
 def _signal_summary(
@@ -17,9 +31,10 @@ def _signal_summary(
     # Intra-signal multi-source disagreement
     contradicted_rows = sum(1 for r in evidence_matrix if r.get("status") == "contradicted")
     missing = sum(1 for r in evidence_matrix if r.get("status") == "missing")
+    scoring_n = len(_scoring_conflicts(conflicts)) + contradicted_rows
     return {
         "confirmations": confirmations,
-        "contradictions": len(conflicts) + contradicted_rows,
+        "contradictions": scoring_n,
         "missing": missing,
     }
 
@@ -35,10 +50,19 @@ def _trust_numeric(
         for r in evidence_matrix
         if r.get("status") == "confirmed" and len(r.get("sources") or []) >= 2
     )
+    n_weak = sum(1 for r in evidence_matrix if r.get("status") == "weakly_supported")
     n_missing = sum(1 for r in evidence_matrix if r.get("status") == "missing")
     contradicted_rows = sum(1 for r in evidence_matrix if r.get("status") == "contradicted")
-    n_conflict_events = len(conflicts) + contradicted_rows
-    score = base + 10 * n_confirm + 5 * n_multi - 12 * n_conflict_events - 5 * n_missing
+    n_conflict_events = len(_scoring_conflicts(conflicts)) + contradicted_rows
+    # Single-source dimensions still carry evidence; multi-source confirmation adds more.
+    score = (
+        base
+        + 10 * n_confirm
+        + 5 * n_multi
+        + 5 * n_weak
+        - 12 * n_conflict_events
+        - 5 * n_missing
+    )
     return max(0, min(100, int(round(score))))
 
 

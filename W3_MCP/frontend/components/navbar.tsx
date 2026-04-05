@@ -15,12 +15,16 @@ import {
   Shield,
   User,
   UserPlus,
+  Bell,
+  Sun,
 } from "lucide-react";
 
 const tabs = [
-  { href: "/research", label: "Research Copilot", icon: Search, id: "ps1" },
-  { href: "/portfolio", label: "Portfolio Monitor", icon: Briefcase, id: "ps2" },
-  { href: "/earnings", label: "Earnings Center", icon: BarChart3, id: "ps3" },
+  { href: "/research", label: "Research", icon: Search, id: "ps1" },
+  { href: "/portfolio", label: "Portfolio", icon: Briefcase, id: "ps2" },
+  { href: "/earnings", label: "Earnings", icon: BarChart3, id: "ps3" },
+  { href: "/brief", label: "Brief", icon: Sun, id: "brief" },
+  { href: "/alerts", label: "Alerts", icon: Bell, id: "alerts" },
   { href: "/settings", label: "Settings", icon: Settings, id: "settings" },
 ];
 
@@ -81,6 +85,13 @@ export function Navbar() {
           <div className="flex items-center gap-3">
             {session ? (
               <>
+                <Link
+                  href="/alerts"
+                  className="relative flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                  title="Alerts & Notifications"
+                >
+                  <Bell className="h-4 w-4" />
+                </Link>
                 <span
                   className={cn(
                     "px-2 py-0.5 rounded-full text-xs font-medium border uppercase tracking-wide",

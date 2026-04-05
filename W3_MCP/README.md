@@ -1,14 +1,44 @@
 # Indian Financial Intelligence — MCP Server
 
-MCP (Model Context Protocol) server that exposes Indian market data, fundamentals, news, mutual funds, filings, and macro indicators as **tiered tools, resources, and prompts**, with **OAuth 2.1 (Keycloak)** and a **Next.js** dashboard. Three product areas are covered: **Research Copilot (PS1)**, **Portfolio risk (PS2)**, and **Earnings season (PS3)**, with **CrewAI** used for analyst-grade cross-source synthesis.
+**FinInt (W3 MCP)** is a production-oriented stack that exposes Indian equities, mutual funds, news, filings, and macro indicators as **tiered MCP tools, resources, and prompts**, secured with **OAuth 2.1 (Keycloak)** and consumed by a **Next.js** dashboard and standard MCP clients.
 
-**Documentation**
+Three product tracks are implemented end-to-end:
 
-| Doc | Use it for |
-|-----|------------|
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local Docker, EC2, ports, security groups, public URL / build args |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, auth enforcement, data facade, persistence, requirements traceability |
-| [docs/MCP.md](docs/MCP.md) | Connecting MCP clients (Claude, Cursor, VS Code), Bearer on `/mcp`, REST bridge, catalog URL |
+| Track | Focus | Typical entry points |
+|-------|--------|----------------------|
+| **PS1 — Research Copilot** | Cross-source stock research | `cross_reference_signals`, `generate_research_brief`, Research UI |
+| **PS2 — Portfolio risk** | Holdings, concentration, macro sensitivity | `portfolio_health_check`, `portfolio_risk_report`, Portfolio UI |
+| **PS3 — Earnings season** | Results, calendar, verdict | `get_earnings_calendar`, `earnings_verdict`, Earnings UI |
+
+**CrewAI** powers analyst-grade multi-agent synthesis; a **deterministic trust-score layer** (`cross_source/`) augments selected tools so the UI can show agreement, conflicts, and confidence without LLM-based scoring.
+
+---
+
+## Documentation map
+
+| Document | Audience | Contents |
+|----------|----------|----------|
+| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Everyone | Deep-dive: layers, E2E lifecycle, CrewAI (agents/tasks/crew/tools/memory/planning), tools design, communication & API flow, LLM strategy, **QA playbook**, observability, **gap analysis**, appendices |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | DevOps / SRE | Docker, EC2, ports, build args, public URLs |
+| [docs/MCP.md](docs/MCP.md) | Client integrators | `/mcp`, REST bridge, IDE setup, curl examples |
+| [docs/data-sources-guide.md](docs/data-sources-guide.md) | Data / backend | External APIs, keys, fallbacks |
+
+### Reading guide by role
+
+- **New developer:** Start with [System architecture (deep dive)](docs/ARCHITECTURE.md#1-system-architecture-deep-dive) and [Tools architecture](docs/ARCHITECTURE.md#3-tools-architecture), then skim `mcp-server/src/server.py` and `data_facade/facade.py`.
+- **QA engineer:** Use [Testing & validation](docs/ARCHITECTURE.md#7-testing--validation-qa-perspective), [Sample execution report](docs/ARCHITECTURE.md#sample-execution-report), and [Architecture gap analysis](docs/ARCHITECTURE.md#architecture-gap-analysis).
+- **AI/ML engineer:** Read [CrewAI concepts](docs/ARCHITECTURE.md#2-crewai-concepts-detailed-explanation) and [LLM & prompt engineering](docs/ARCHITECTURE.md#6-llm--prompt-engineering); inspect `mcp-server/src/crews/*.py` and `tracing.py`.
+- **System architect:** Focus on [Communication flow](docs/ARCHITECTURE.md#4-communication-flow), [API & data flow](docs/ARCHITECTURE.md#5-api--data-flow), persistence, and gap table.
+
+**Deliverables** requested for this documentation pass are consolidated as follows:
+
+| Deliverable | Location |
+|-------------|----------|
+| Enhanced architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (full rewrite / expansion) |
+| Enhanced README | This file |
+| QA report & strategy | [§7 Testing & validation](docs/ARCHITECTURE.md#7-testing--validation-qa-perspective) |
+| Architecture gap analysis | [Architecture gap analysis](docs/ARCHITECTURE.md#architecture-gap-analysis) |
+| Execution flow documentation | [§1.3 E2E lifecycle](docs/ARCHITECTURE.md#13-end-to-end-request-lifecycle-dashboard--tool--data), [§4 Communication flow](docs/ARCHITECTURE.md#4-communication-flow), [Appendix A](docs/ARCHITECTURE.md#appendix-a--rest-tool-call-sequence-detailed) |
 
 ---
 
@@ -16,38 +46,38 @@ MCP (Model Context Protocol) server that exposes Indian market data, fundamental
 
 ```
 W3_MCP/
-├── mcp-server/          # Python FastMCP app: tools, resources, prompts, JWT auth, rate limits, audit, data facade, CrewAI crews
-├── frontend/            # Next.js 14 app: research / portfolio / earnings tabs, NextAuth + Keycloak
+├── mcp-server/          # Python FastMCP: tools, resources, prompts, JWT, rate limits, audit, DataFacade, CrewAI, DB repos
+├── frontend/            # Next.js App Router: research / portfolio / earnings / brief / alerts / settings / admin
 ├── keycloak/            # Realm export (tiers, clients, demo users)
 ├── db/                  # PostgreSQL init (schema seed)
-├── docker-compose.yml   # Orchestrates 5 services
-├── .env.example         # Required and optional API keys (with comments)
-└── docs/                # DEPLOYMENT, ARCHITECTURE, MCP
+├── docker-compose.yml   # Orchestrates services
+├── .env.example         # Required and optional keys (commented)
+└── docs/                # ARCHITECTURE, DEPLOYMENT, MCP, data-sources-guide
 ```
 
-Source layout inside `mcp-server/src/` and `frontend/` is summarized in [docs/ARCHITECTURE.md — Repo layout](docs/ARCHITECTURE.md#repo-layout).
+Detailed tree: [docs/ARCHITECTURE.md — Appendix C](docs/ARCHITECTURE.md#appendix-c--repo-layout).
 
 ---
 
 ## Run locally
 
-From this directory (where `docker-compose.yml` lives):
+From the directory that contains `docker-compose.yml`:
 
 ```bash
 cd W3_MCP
 
 cp .env.example .env
-# Set OPENAI_API_KEY (required). Add other keys from .env.example as needed.
+# Set OPENAI_API_KEY (required for CrewAI). Add other keys as needed — see .env.example.
 
 docker compose up -d --build
 ```
 
 First startup may take **1–2 minutes** (Keycloak realm import, health checks).
 
-| URL | What |
-|-----|------|
-| http://localhost:10005 | Dashboard |
-| http://localhost:10004 | MCP server (`/health`, `POST /mcp`, REST bridge `/api/tool/...`) |
+| URL | Service |
+|-----|---------|
+| http://localhost:10005 | Dashboard (Next.js) |
+| http://localhost:10004 | MCP server (`/health`, `POST /mcp`, `POST /api/tool/...`) |
 | http://localhost:10003 | Keycloak |
 
 **Verify**
@@ -62,9 +92,15 @@ curl -s http://localhost:10004/health
 
 ## Configuration
 
-`OPENAI_API_KEY` is **required** for CrewAI. Other variables (Angel One, Alpha Vantage, Finnhub, GNews, LangSmith, etc.) are **optional** but improve coverage—see **`.env.example`** for names and signup links.
+| Variable | Role |
+|----------|------|
+| `OPENAI_API_KEY` | **Required** for CrewAI (research / risk / earnings crews) |
+| `LANGSMITH_TRACING`, `LANGSMITH_API_KEY` | Optional OpenTelemetry traces to LangSmith ([observability](docs/ARCHITECTURE.md#8-observability--reporting)) |
+| Angel One, Alpha Vantage, Finnhub, GNews, etc. | Optional; improve coverage — see `.env.example` and [data-sources-guide.md](docs/data-sources-guide.md) |
 
-Ports exposed on the host: **10001** Postgres, **10002** Redis, **10003** Keycloak, **10004** MCP, **10005** frontend.
+Ports on the host: **10001** Postgres, **10002** Redis, **10003** Keycloak, **10004** MCP, **10005** frontend.
+
+**JWT issuer:** Tokens must have `iss` equal to your configured **public** Keycloak issuer (`KEYCLOAK_PUBLIC_URL/realms/finint`). If you obtain tokens against an internal Docker hostname while the server validates the public issuer, validation fails — use the same issuer the MCP server expects ([gap G5](docs/ARCHITECTURE.md#architecture-gap-analysis)).
 
 ---
 
@@ -72,8 +108,10 @@ Ports exposed on the host: **10001** Postgres, **10002** Redis, **10003** Keyclo
 
 Base URL: `http://localhost:10004`
 
-- **Public:** `GET /health`, `GET /.well-known/oauth-protected-resource`, `GET /api/status`
-- **Authenticated (Bearer JWT):** `POST /mcp`, `POST /api/tool/{name}`, `GET /api/resource?uri=...`
+| Class | Paths |
+|-------|--------|
+| Public | `GET /health`, `GET /.well-known/oauth-protected-resource`, `GET /api/status` |
+| Authenticated | `POST /mcp`, `POST /api/tool/{name}`, `GET /api/resource?uri=...` |
 
 Example (after obtaining a token from Keycloak):
 
@@ -84,31 +122,44 @@ curl -s -X POST http://localhost:10004/api/tool/get_stock_quote \
   -d '{"symbol": "RELIANCE"}'
 ```
 
-Scopes, tier matrices, rate limits (30 / 150 / 500 per hour), admin routes, and native MCP vs REST parity: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — see **Auth & enforcement** and **Requirements traceability**.
+**Scopes, tier matrix, rate limits (30 / 150 / 500 per hour), and MCP vs REST parity:** [§1.4 Auth & enforcement](docs/ARCHITECTURE.md#14-auth--enforcement), [§5 API & data flow](docs/ARCHITECTURE.md#5-api--data-flow), and [Requirements traceability](docs/ARCHITECTURE.md#requirements-traceability).
 
 ---
 
 ## Demo users (Keycloak)
 
-| User | Password | Notes |
-|------|----------|--------|
-| `free_user` | `free123` | Free tier |
-| `premium_user` | `premium123` | Premium tier |
-| `analyst_user` | `analyst123` | Analyst tier |
-| `admin` | `admin123` | Admin flows (e.g. tier requests) |
+| User | Password | Tier |
+|------|----------|------|
+| `free_user` | `free123` | Free |
+| `premium_user` | `premium123` | Premium |
+| `analyst_user` | `analyst123` | Analyst |
+| `admin` | `admin123` | Admin (tier requests, admin routes) |
 
-Keycloak admin console: http://localhost:10003 — default `admin` / `admin` from Compose (change for any real deployment).
+Keycloak admin console: http://localhost:10003 — default `admin` / `admin` from Compose (change before any real deployment).
+
+**Smoke test (tier boundary):** call `POST /api/tool/earnings_verdict` with a **free** token → **403**; with **analyst** → **200** (requires valid symbol and OpenAI key). See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for token endpoint examples.
 
 ---
 
 ## Development
 
 ```bash
-docker compose up -d --build mcp-server    # or frontend
+docker compose up -d --build mcp-server    # or: frontend
 docker compose logs -f mcp-server
-docker compose exec redis redis-cli FLUSHDB  # clear cache
+docker compose exec redis redis-cli FLUSHDB  # clear L2 cache / rate windows
 ```
 
-**Smoke test (tier boundary):** obtain tokens from Keycloak’s token endpoint (password grant is fine for local dev), then call `/api/tool/earnings_verdict` with a **free** token (expect **403**) and an **analyst** token (expect success). Full examples: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) verify section and [docs/ARCHITECTURE.md — Appendix](docs/ARCHITECTURE.md#appendix-rest-tool-call-sequence).
+**Architecture, CrewAI, tools, QA, and gaps:** **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.  
+**MCP / REST client setup:** **[docs/MCP.md](docs/MCP.md)**.
 
-**Architecture and auth:** **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. **MCP / REST client setup:** **[docs/MCP.md](docs/MCP.md)**.
+---
+
+## Security & operations notes
+
+- Upstream API keys live **only** on the server; the browser uses **short-lived JWTs**.
+- CORS is permissive in demo mode; tighten for production ([DEPLOYMENT.md](docs/DEPLOYMENT.md)).
+- Review [Architecture gap analysis](docs/ARCHITECTURE.md#architecture-gap-analysis) for REST resource scope hardening and validation error handling.
+
+---
+
+*README aligned with ARCHITECTURE.md v2.0 — FinInt / W3 MCP.*

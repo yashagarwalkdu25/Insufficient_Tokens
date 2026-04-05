@@ -130,6 +130,16 @@ def _merge_sources(
     return seen[:8] if seen else ["multiple"]
 
 
+def _remap_portfolio_logical(normalized: list[dict[str, Any]]) -> None:
+    """Risk crew often emits research-style logical names; map into portfolio matrix."""
+    for r in normalized:
+        ln = r.get("logical_name")
+        if ln == "macro_support":
+            r["logical_name"] = "macro_sensitivity"
+        elif ln == "news_sentiment":
+            r["logical_name"] = "sentiment_shift"
+
+
 def build_evidence_and_conflicts(
     signals: list[dict[str, Any]] | None,
     context: Context,
@@ -139,6 +149,8 @@ def build_evidence_and_conflicts(
     missing_expected_count.
     """
     normalized = normalize_rows(signals)
+    if context == "portfolio":
+        _remap_portfolio_logical(normalized)
     groups = group_by_logical(normalized)
     expected = EXPECTED[context]
     evidence_matrix: list[dict[str, Any]] = []

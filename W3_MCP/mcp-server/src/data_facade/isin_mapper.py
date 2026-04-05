@@ -87,6 +87,40 @@ class ISINMapper:
             logger.debug("isin_mapper.miss", query=symbol_or_isin)
         return mapping
 
+    def register(self, mapping: ISINMapping) -> None:
+        """Dynamically register a new mapping at runtime."""
+        self._by_nse[mapping.nse_symbol.upper()] = mapping
+        if mapping.isin:
+            self._by_isin[mapping.isin] = mapping
+        if mapping.bse_scrip_code:
+            self._by_bse[mapping.bse_scrip_code] = mapping
+        logger.info("isin_mapper.registered", symbol=mapping.nse_symbol)
+
+    async def resolve_or_discover(self, symbol: str, bse_adapter: Any = None) -> ISINMapping | None:
+        """Try static resolve first, then attempt BSE dynamic discovery."""
+        existing = self.resolve(symbol)
+        if existing is not None:
+            return existing
+
+        if bse_adapter is None:
+            return None
+
+        scrip = await bse_adapter.search_scrip(symbol)
+        if scrip is None:
+            return None
+
+        mapping = ISINMapping(
+            isin="",
+            nse_symbol=symbol.upper(),
+            bse_scrip_code=scrip,
+            yfinance_ticker=f"{symbol.upper()}.NS",
+            alpha_vantage_ticker=f"{symbol.upper()}.BSE",
+            company_name=symbol.upper(),
+            sector="",
+        )
+        self.register(mapping)
+        return mapping
+
     async def load_from_db(self, pool: Any) -> None:
         """Load additional mappings from PostgreSQL at startup."""
         try:
