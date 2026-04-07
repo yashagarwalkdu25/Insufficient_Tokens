@@ -22,6 +22,7 @@ from ..config.constants import (
     TTL_MACRO,
     TTL_MF_NAV,
     TTL_NEWS,
+    TTL_PRICE_HISTORY,
     TTL_QUOTE_MARKET_HOURS,
     TTL_SHAREHOLDING,
     TTL_TECHNICAL_INDICATORS,
@@ -164,6 +165,30 @@ class DataFacade:
             call_map={
                 "angel_one": lambda: self.angel.get_quote(nse),
                 "yfinance": lambda: self.yfinance.get_quote(nse),
+            },
+        )
+
+    async def get_price_history(
+        self,
+        symbol: str,
+        from_date: str,
+        to_date: str,
+        interval: str = "1d",
+    ) -> dict[str, Any]:
+        """Historical OHLCV bars (NSE). Primary source: yfinance date-range ``history``."""
+        mapping = isin_mapper.resolve(symbol)
+        nse = mapping.nse_symbol if mapping else symbol.strip().upper()
+        cache_id = f"{nse}:{from_date}:{to_date}:{interval}"
+
+        return await self._fallback_chain(
+            data_type="price_history",
+            identifier=cache_id,
+            ttl=TTL_PRICE_HISTORY,
+            chain=["yfinance"],
+            call_map={
+                "yfinance": lambda: self.yfinance.get_historical_range(
+                    nse, from_date, to_date, interval
+                ),
             },
         )
 

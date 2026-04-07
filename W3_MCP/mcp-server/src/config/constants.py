@@ -7,6 +7,7 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 TTL_QUOTE_MARKET_HOURS = 30
 TTL_QUOTE_AFTER_HOURS = 43_200        # 12 hours
+TTL_PRICE_HISTORY = 3_600             # 1 hour — OHLCV bars change slowly
 TTL_FUNDAMENTALS = 86_400              # 24 hours
 TTL_NEWS = 900                         # 15 minutes
 TTL_MF_NAV = 43_200                    # 12 hours

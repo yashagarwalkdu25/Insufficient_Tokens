@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
@@ -99,6 +101,112 @@ class YFinanceAdapter:
             return await self._run_with_backoff(self._fetch_historical, symbol, period, interval)
         except Exception as exc:
             logger.error("yfinance.historical.error", symbol=symbol, error=str(exc))
+            return {"error": str(exc), "error_code": "YF_HISTORICAL_FAILED", "_source": "yfinance"}
+
+    def _fetch_historical_range(
+        self,
+        symbol: str,
+        from_date: str,
+        to_date: str,
+        interval: str,
+    ) -> dict[str, Any]:
+        """Fetch OHLCV bars between *from_date* and *to_date* (inclusive, IST calendar days).
+
+        Yahoo's ``history(end=...)`` is exclusive, so *end* is set to the day after *to_date*.
+        """
+        import yfinance as yf
+
+        allowed = {"1d", "1wk", "1mo"}
+        if interval not in allowed:
+            return {
+                "error": f"interval must be one of {sorted(allowed)}",
+                "error_code": "INVALID_INTERVAL",
+                "_source": "yfinance",
+            }
+
+        try:
+            fd = datetime.strptime(from_date, "%Y-%m-%d").date()
+            td = datetime.strptime(to_date, "%Y-%m-%d").date()
+        except ValueError:
+            return {
+                "error": "from_date and to_date must be YYYY-MM-DD",
+                "error_code": "INVALID_DATE",
+                "_source": "yfinance",
+            }
+
+        if fd > td:
+            return {
+                "error": "from_date must be on or before to_date",
+                "error_code": "INVALID_RANGE",
+                "_source": "yfinance",
+            }
+
+        end_exclusive = (td + timedelta(days=1)).strftime("%Y-%m-%d")
+        ticker = yf.Ticker(f"{symbol}.NS")
+        df = ticker.history(start=from_date, end=end_exclusive, interval=interval)
+
+        bars: list[dict[str, Any]] = []
+        for idx, row in df.iterrows():
+            close = row["Close"]
+            if close is None or (isinstance(close, float) and math.isnan(close)):
+                continue
+            vol = row["Volume"]
+            if vol is None or (isinstance(vol, float) and math.isnan(vol)):
+                v_int = 0
+            else:
+                v_int = int(vol)
+
+            def _r(x: Any) -> float:
+                if x is None or (isinstance(x, float) and math.isnan(x)):
+                    return float("nan")
+                return round(float(x), 2)
+
+            o, h, low, c = _r(row["Open"]), _r(row["High"]), _r(row["Low"]), _r(row["Close"])
+            if any(isinstance(v, float) and math.isnan(v) for v in (o, h, low, c)):
+                continue
+
+            bars.append(
+                {
+                    "date": str(idx.date()) if hasattr(idx, "date") else str(idx)[:10],
+                    "open": o,
+                    "high": h,
+                    "low": low,
+                    "close": c,
+                    "volume": v_int,
+                }
+            )
+
+        return {
+            "symbol": symbol,
+            "from_date": from_date,
+            "to_date": to_date,
+            "interval": interval,
+            "bars": bars,
+            "_source": "yfinance",
+        }
+
+    async def get_historical_range(
+        self,
+        symbol: str,
+        from_date: str,
+        to_date: str,
+        interval: str = "1d",
+    ) -> dict[str, Any]:
+        """Fetch historical OHLCV for an explicit date range (NSE ``.NS`` ticker)."""
+        try:
+            return await self._run_with_backoff(
+                self._fetch_historical_range,
+                symbol,
+                from_date,
+                to_date,
+                interval,
+            )
+        except Exception as exc:
+            logger.error(
+                "yfinance.historical_range.error",
+                symbol=symbol,
+                error=str(exc),
+            )
             return {"error": str(exc), "error_code": "YF_HISTORICAL_FAILED", "_source": "yfinance"}
 
     def _fetch_financials(self, symbol: str) -> dict[str, Any]:

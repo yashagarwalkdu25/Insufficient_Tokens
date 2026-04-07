@@ -1,6 +1,7 @@
 """Market data tools — stock quotes, price history, indices, movers, and technicals."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,8 +23,6 @@ async def get_stock_quote(symbol: str) -> dict[str, Any]:
     Returns:
         dict with keys: data, source, cache_status, timestamp, disclaimer.
     """
-    import re
-
     symbol = symbol.strip().upper()
     if not symbol or not re.match(r"^[A-Z0-9&_.-]{1,20}$", symbol):
         return {
@@ -90,8 +89,45 @@ async def get_price_history(
     """
     page_size = max(1, min(page_size, 500))
     page = max(1, page)
-    # TODO: Add dedicated price_history method to DataFacade
-    result = await data_facade.get_price(symbol)
+
+    symbol = symbol.strip().upper()
+    if not symbol or not re.match(r"^[A-Z0-9&_.-]{1,20}$", symbol):
+        return {
+            "error": f"Invalid symbol: '{symbol}'. Must be a valid NSE/BSE ticker (e.g. RELIANCE, TCS, INFY).",
+            "error_code": "INVALID_SYMBOL",
+        }
+
+    allowed_iv = {"1d", "1wk", "1mo"}
+    if interval not in allowed_iv:
+        return {
+            "error": f"interval must be one of {sorted(allowed_iv)}",
+            "error_code": "INVALID_INTERVAL",
+        }
+
+    try:
+        fd = datetime.strptime(from_date.strip(), "%Y-%m-%d").date()
+        td = datetime.strptime(to_date.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return {
+            "error": "from_date and to_date must be YYYY-MM-DD",
+            "error_code": "INVALID_DATE",
+        }
+
+    if fd > td:
+        return {
+            "error": "from_date must be on or before to_date",
+            "error_code": "INVALID_RANGE",
+        }
+
+    result = await data_facade.get_price_history(
+        symbol, from_date.strip(), to_date.strip(), interval
+    )
+    if "error" in result:
+        return {
+            "error": result["error"],
+            "error_code": result.get("error_code", "UNKNOWN"),
+        }
+
     all_bars = result.get("bars", [])
     total = len(all_bars)
     start = (page - 1) * page_size
