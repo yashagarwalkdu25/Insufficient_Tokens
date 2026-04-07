@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinInt MCP — System Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0e1a; color: #e2e8f0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; min-height: 100vh; padding: 32px; }
+  h1 { text-align: center; font-size: 28px; font-weight: 700; margin-bottom: 6px; background: linear-gradient(135deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { text-align: center; color: #94a3b8; font-size: 14px; margin-bottom: 36px; }
+
+  /* Layout */
+  .arch { display: flex; flex-direction: column; gap: 20px; max-width: 1200px; margin: 0 auto; }
+  .layer { border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; position: relative; background: rgba(255,255,255,0.02); }
+  .layer-label { position: absolute; top: -11px; left: 24px; background: #0a0e1a; padding: 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; }
+
+  /* Boxes */
+  .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .box { border-radius: 10px; padding: 14px 18px; text-align: center; min-width: 130px; flex: 1; max-width: 220px; position: relative; }
+  .box .name { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .box .desc { font-size: 11px; opacity: 0.7; line-height: 1.4; }
+  .box .port { font-size: 10px; font-family: 'SF Mono', 'Fira Code', monospace; opacity: 0.5; margin-top: 4px; }
+
+  /* Color themes */
+  .client { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); }
+  .client .name { color: #818cf8; }
+  .client .layer-label { color: #818cf8; }
+
+  .server { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); }
+  .server .name { color: #34d399; }
+  .server .layer-label { color: #34d399; }
+
+  .middleware { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2); }
+  .middleware .name { color: #fbbf24; }
+  .middleware .layer-label { color: #fbbf24; }
+
+  .tool { background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.2); }
+  .tool .name { color: #38bdf8; }
+  .tool .layer-label { color: #38bdf8; }
+
+  .crew { background: rgba(192,132,252,0.1); border: 1px solid rgba(192,132,252,0.25); }
+  .crew .name { color: #c084fc; }
+  .crew .layer-label { color: #c084fc; }
+
+  .trust { background: rgba(244,114,182,0.1); border: 1px solid rgba(244,114,182,0.25); }
+  .trust .name { color: #f472b6; }
+  .trust .layer-label { color: #f472b6; }
+
+  .facade { background: rgba(251,146,60,0.1); border: 1px solid rgba(251,146,60,0.25); }
+  .facade .name { color: #fb923c; }
+  .facade .layer-label { color: #fb923c; }
+
+  .adapter { background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2); }
+  .adapter .name { color: #4ade80; }
+  .adapter .layer-label { color: #4ade80; }
+
+  .infra { background: rgba(148,163,184,0.08); border: 1px solid rgba(148,163,184,0.15); }
+  .infra .name { color: #94a3b8; }
+  .infra .layer-label { color: #94a3b8; }
+
+  .db { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.2); }
+  .db .name { color: #60a5fa; }
+
+  /* Arrows */
+  .arrow-down { text-align: center; padding: 4px 0; }
+  .arrow-down span { display: inline-block; color: #475569; font-size: 20px; line-height: 1; animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  .arrow-label { text-align: center; font-size: 10px; color: #64748b; font-family: monospace; margin-top: -2px; margin-bottom: 2px; }
+
+  /* Flow section */
+  .flow-section { margin-top: 40px; max-width: 1200px; margin-left: auto; margin-right: auto; }
+  .flow-section h2 { font-size: 20px; margin-bottom: 16px; color: #c084fc; }
+  .flow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .flow-step { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; position: relative; }
+  .flow-step .step-num { position: absolute; top: -8px; left: 14px; background: #c084fc; color: #0a0e1a; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 10px; }
+  .flow-step .step-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; margin-top: 6px; color: #e2e8f0; }
+  .flow-step .step-desc { font-size: 11px; color: #94a3b8; line-height: 1.5; }
+
+  /* Tier table */
+  .tier-section { margin-top: 40px; max-width: 1200px; margin-left: auto; margin-right: auto; }
+  .tier-section h2 { font-size: 20px; margin-bottom: 16px; color: #fbbf24; }
+  .tier-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tier-table th { text-align: left; padding: 10px 14px; background: rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.08); color: #94a3b8; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .tier-table td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .tier-free { color: #4ade80; }
+  .tier-premium { color: #38bdf8; }
+  .tier-analyst { color: #c084fc; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; }
+  .badge-free { background: rgba(74,222,128,0.15); color: #4ade80; }
+  .badge-premium { background: rgba(56,189,248,0.15); color: #38bdf8; }
+  .badge-analyst { background: rgba(192,132,252,0.15); color: #c084fc; }
+
+  /* Inner sub-row */
+  .sub-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+  .sub-box { border-radius: 6px; padding: 6px 10px; font-size: 10px; text-align: center; min-width: 80px; }
+
+  .inner-section { margin-top: 10px; }
+  .inner-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; opacity: 0.5; text-align: center; }
+
+  /* Legend */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-top: 32px; padding: 16px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); max-width: 1200px; margin-left: auto; margin-right: auto; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #94a3b8; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<h1>FinInt (W3 MCP) — System Architecture</h1>
+<p class="subtitle">Indian Financial Intelligence Platform &middot; MCP Server + Next.js Dashboard + CrewAI Multi-Agent Pipelines</p>
+
+<div class="arch">
+
+  <!-- Layer 1: Clients -->
+  <div class="layer" style="border-color: rgba(99,102,241,0.2);">
+    <div class="layer-label" style="color: #818cf8;">Clients</div>
+    <div class="row">
+      <div class="box client">
+        <div class="name">Next.js Dashboard</div>
+        <div class="desc">Research, Portfolio, Earnings, Alerts, Brief, Admin</div>
+        <div class="port">:10005</div>
+      </div>
+      <div class="box client">
+        <div class="name">Claude Desktop</div>
+        <div class="desc">MCP native client via Streamable HTTP</div>
+      </div>
+      <div class="box client">
+        <div class="name">Cursor IDE</div>
+        <div class="desc">MCP native client via Streamable HTTP</div>
+      </div>
+      <div class="box client">
+        <div class="name">Any MCP Client</div>
+        <div class="desc">Standard MCP protocol via POST /mcp</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down"><span>▼ ▼ ▼</span></div>
+  <div class="arrow-label">REST: POST /api/tool/{name} &nbsp;&nbsp;|&nbsp;&nbsp; MCP: POST /mcp &nbsp;&nbsp;|&nbsp;&nbsp; Bearer JWT</div>
+
+  <!-- Layer 2: MCP Server -->
+  <div class="layer" style="border-color: rgba(16,185,129,0.2);">
+    <div class="layer-label" style="color: #34d399;">MCP Server (FastMCP + Uvicorn) :10004</div>
+
+    <!-- Auth / Middleware -->
+    <div class="inner-section">
+      <div class="inner-label" style="color: #fbbf24;">Auth &amp; Middleware Pipeline</div>
+      <div class="row">
+        <div class="box middleware">
+          <div class="name">JWT Validator</div>
+          <div class="desc">Keycloak JWKS signature verification</div>
+        </div>
+        <div class="box middleware">
+          <div class="name">Tier / Scope Check</div>
+          <div class="desc">TOOL_SCOPE_MAP enforcement per tool</div>
+        </div>
+        <div class="box middleware">
+          <div class="name">Rate Limiter</div>
+          <div class="desc">Redis sliding window (30/150/500 per hr)</div>
+        </div>
+        <div class="box middleware">
+          <div class="name">Audit Logger</div>
+          <div class="desc">Postgres: user, tool, tier, latency</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- REST Bridge -->
+    <div class="inner-section" style="margin-top: 14px;">
+      <div class="inner-label" style="color: #34d399;">REST Bridge + MCP Endpoint</div>
+      <div class="row">
+        <div class="box server">
+          <div class="name">POST /api/tool/{name}</div>
+          <div class="desc">REST bridge for frontend — calls mcp.call_tool()</div>
+        </div>
+        <div class="box server">
+          <div class="name">POST /mcp</div>
+          <div class="desc">Streamable HTTP — native MCP protocol</div>
+        </div>
+        <div class="box server">
+          <div class="name">GET /api/resource</div>
+          <div class="desc">MCP resource reader via REST</div>
+        </div>
+        <div class="box server">
+          <div class="name">Custom Routes</div>
+          <div class="desc">/health, /api/status, /api/tools/catalog, tier-requests</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tools -->
+    <div class="inner-section" style="margin-top: 14px;">
+      <div class="inner-label" style="color: #38bdf8;">Tool Modules (10 domains, 40+ tools)</div>
+      <div class="row">
+        <div class="box tool"><div class="name">Market</div><div class="desc">Quotes, history, indices, movers</div></div>
+        <div class="box tool"><div class="name">Fundamentals</div><div class="desc">Ratios, statements, shareholding</div></div>
+        <div class="box tool"><div class="name">Mutual Funds</div><div class="desc">NAV, search, compare</div></div>
+        <div class="box tool"><div class="name">News</div><div class="desc">Company news, sentiment</div></div>
+        <div class="box tool"><div class="name">Macro</div><div class="desc">RBI rates, CPI, GDP</div></div>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <div class="box tool"><div class="name">Filings</div><div class="desc">BSE filings, parsing</div></div>
+        <div class="box tool"><div class="name">Portfolio</div><div class="desc">Holdings, risk, P&L</div></div>
+        <div class="box tool"><div class="name">Earnings</div><div class="desc">Calendar, verdict</div></div>
+        <div class="box tool"><div class="name">Cross-Source</div><div class="desc">Signal matrix, research brief</div></div>
+        <div class="box tool"><div class="name">Alerts</div><div class="desc">Price, risk, sentiment, brief</div></div>
+      </div>
+    </div>
+
+    <!-- CrewAI -->
+    <div class="inner-section" style="margin-top: 14px;">
+      <div class="inner-label" style="color: #c084fc;">CrewAI Multi-Agent Crews (OpenAI GPT-4o / 4o-mini)</div>
+      <div class="row">
+        <div class="box crew" style="max-width: 340px;">
+          <div class="name">PS1: Research Crew</div>
+          <div class="desc">5 agents — Data Collector, Fundamental Analyst, Sentiment Analyst, Macro Analyst → Synthesizer</div>
+          <div class="sub-row">
+            <div class="sub-box" style="background:rgba(192,132,252,0.08); border: 1px solid rgba(192,132,252,0.15); color: #c084fc;">4 parallel</div>
+            <div class="sub-box" style="background:rgba(192,132,252,0.08); border: 1px solid rgba(192,132,252,0.15); color: #c084fc;">1 sequential</div>
+          </div>
+        </div>
+        <div class="box crew" style="max-width: 340px;">
+          <div class="name">PS2: Risk Crew</div>
+          <div class="desc">4 agents — Scanner, Risk Detector, Macro Mapper → Risk Narrator</div>
+          <div class="sub-row">
+            <div class="sub-box" style="background:rgba(192,132,252,0.08); border: 1px solid rgba(192,132,252,0.15); color: #c084fc;">3 parallel</div>
+            <div class="sub-box" style="background:rgba(192,132,252,0.08); border: 1px solid rgba(192,132,252,0.15); color: #c084fc;">1 sequential</div>
+          </div>
+        </div>
+        <div class="box crew" style="max-width: 340px;">
+          <div class="name">PS3: Earnings Crew</div>
+          <div class="desc">4 agents — Filing Fetcher, Market Reactor → Filing Parser → Narrator</div>
+          <div class="sub-row">
+            <div class="sub-box" style="background:rgba(192,132,252,0.08); border: 1px solid rgba(192,132,252,0.15); color: #c084fc;">2 parallel</div>
+            <div class="sub-box" style="background:rgba(192,132,252,0.08); border: 1px solid rgba(192,132,252,0.15); color: #c084fc;">2 sequential</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trust Score -->
+    <div class="inner-section" style="margin-top: 14px;">
+      <div class="inner-label" style="color: #f472b6;">Deterministic Trust Score Layer (No LLM)</div>
+      <div class="row">
+        <div class="box trust"><div class="name">Signal Normalizer</div><div class="desc">Standardize signals across sources</div></div>
+        <div class="box trust"><div class="name">Conflict Detector</div><div class="desc">Evidence matrix: confirmed / contradicted / missing</div></div>
+        <div class="box trust"><div class="name">Trust Scorer</div><div class="desc">0-100 score = 50 + 10×confirmed - 12×conflicts - 5×missing</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down"><span>▼ ▼ ▼</span></div>
+  <div class="arrow-label">DataFacade: L1 (LRU) → L2 (Redis) → Source₁ → Source₂ → Stale → Error</div>
+
+  <!-- Layer 3: Data Facade -->
+  <div class="layer" style="border-color: rgba(251,146,60,0.2);">
+    <div class="layer-label" style="color: #fb923c;">Data Facade (Singleton) — Caching + Circuit Breakers + Fallback Chains</div>
+    <div class="row">
+      <div class="box facade">
+        <div class="name">L1 Cache</div>
+        <div class="desc">In-memory LRU (1000 items)</div>
+      </div>
+      <div class="box facade">
+        <div class="name">L2 Cache</div>
+        <div class="desc">Redis with ±10% TTL jitter + stale shadow keys (3× TTL)</div>
+      </div>
+      <div class="box facade">
+        <div class="name">Circuit Breakers</div>
+        <div class="desc">Per-source: 5 failures / 60s → OPEN → 60s recovery → HALF_OPEN</div>
+      </div>
+      <div class="box facade">
+        <div class="name">ISIN Mapper</div>
+        <div class="desc">NSE ↔ BSE ↔ yfinance ↔ Alpha Vantage ticker translation</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-down"><span>▼ ▼ ▼</span></div>
+  <div class="arrow-label">Fallback chains: Angel One → yfinance &nbsp;|&nbsp; Alpha Vantage → yfinance &nbsp;|&nbsp; Finnhub → GNews &nbsp;|&nbsp; BSE &nbsp;|&nbsp; MFAPI &nbsp;|&nbsp; RBI DBIE</div>
+
+  <!-- Layer 4: External APIs -->
+  <div class="layer" style="border-color: rgba(74,222,128,0.15);">
+    <div class="layer-label" style="color: #4ade80;">Upstream Data Adapters (8 External APIs)</div>
+    <div class="row">
+      <div class="box adapter"><div class="name">Angel One</div><div class="desc">Real-time quotes, OHLCV</div></div>
+      <div class="box adapter"><div class="name">yfinance</div><div class="desc">Quotes, fundamentals, holders</div></div>
+      <div class="box adapter"><div class="name">Alpha Vantage</div><div class="desc">Company overview, technicals</div></div>
+      <div class="box adapter"><div class="name">Finnhub</div><div class="desc">News, earnings calendar</div></div>
+    </div>
+    <div class="row" style="margin-top: 8px;">
+      <div class="box adapter"><div class="name">GNews</div><div class="desc">News search by keyword</div></div>
+      <div class="box adapter"><div class="name">BSE India</div><div class="desc">Filings, board meetings, shareholding</div></div>
+      <div class="box adapter"><div class="name">MFAPI</div><div class="desc">Mutual fund NAV &amp; search</div></div>
+      <div class="box adapter"><div class="name">RBI DBIE</div><div class="desc">Repo rate, CPI, GDP, forex</div></div>
+    </div>
+  </div>
+
+  <div style="height: 12px;"></div>
+
+  <!-- Layer 5: Infrastructure -->
+  <div class="layer" style="border-color: rgba(148,163,184,0.12);">
+    <div class="layer-label" style="color: #94a3b8;">Infrastructure (Docker Compose)</div>
+    <div class="row">
+      <div class="box db">
+        <div class="name">PostgreSQL 16</div>
+        <div class="desc">Users, portfolios, watchlists, alerts, notifications, audit log, ISIN mapping, cached research</div>
+        <div class="port">:10001</div>
+      </div>
+      <div class="box infra" style="border-color: rgba(239,68,68,0.2); background: rgba(239,68,68,0.06);">
+        <div class="name" style="color: #f87171;">Redis 7</div>
+        <div class="desc">L2 cache, rate-limit windows, stale keys (128 MB LRU)</div>
+        <div class="port">:10002</div>
+      </div>
+      <div class="box infra" style="border-color: rgba(251,191,36,0.2); background: rgba(251,191,36,0.06);">
+        <div class="name" style="color: #fbbf24;">Keycloak 26.5</div>
+        <div class="desc">OAuth 2.1 + PKCE, realm finint, 4 tiers, JWKS, token lifecycle</div>
+        <div class="port">:10003</div>
+      </div>
+      <div class="box infra" style="border-color: rgba(168,85,247,0.2); background: rgba(168,85,247,0.06);">
+        <div class="name" style="color: #a855f7;">OpenAI</div>
+        <div class="desc">GPT-4o (reasoning), GPT-4o-mini (fast) for CrewAI agents</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- E2E Flow -->
+<div class="flow-section">
+  <h2>End-to-End Flow: Research Request</h2>
+  <div class="flow-grid">
+    <div class="flow-step">
+      <div class="step-num">1</div>
+      <div class="step-title">User Action</div>
+      <div class="step-desc">User searches "RELIANCE" on Research page. Frontend calls POST /api/tool/cross_reference_signals with Bearer JWT.</div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">2</div>
+      <div class="step-title">Auth Pipeline</div>
+      <div class="step-desc">JWT validated via Keycloak JWKS → scope check (research:generate = Analyst) → rate limit check → audit log written.</div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">3</div>
+      <div class="step-title">CrewAI Kickoff</div>
+      <div class="step-desc">4 agents run in parallel: price (Angel One), fundamentals (Alpha Vantage), news (Finnhub), macro (RBI DBIE).</div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">4</div>
+      <div class="step-title">Data Facade</div>
+      <div class="step-desc">Each agent's tool calls hit DataFacade: L1→L2→source→fallback. Circuit breakers protect each API independently.</div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">5</div>
+      <div class="step-title">Synthesis</div>
+      <div class="step-desc">Synthesizer agent combines all findings into CrossSourceAnalysisOutput with signals, contradictions, citations.</div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">6</div>
+      <div class="step-title">Trust Score</div>
+      <div class="step-desc">Deterministic trust scorer: normalize signals → detect conflicts → compute 0-100 score. No LLM used.</div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">7</div>
+      <div class="step-title">Cache &amp; Return</div>
+      <div class="step-desc">Result cached in Postgres (1hr TTL). JSON response with data, source, trust_score, disclaimer returned to frontend.</div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">8</div>
+      <div class="step-title">UI Render</div>
+      <div class="step-desc">Dashboard shows signal cards, Trust Score Panel (confirmed/conflict/missing), contradiction details, and source citations.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Tier Matrix -->
+<div class="tier-section">
+  <h2>Tier Access Matrix</h2>
+  <table class="tier-table">
+    <thead>
+      <tr>
+        <th>Capability</th>
+        <th><span class="badge badge-free">Free</span></th>
+        <th><span class="badge badge-premium">Premium</span></th>
+        <th><span class="badge badge-analyst">Analyst</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Stock quotes, price history, index data</td>
+        <td class="tier-free">&#10003;</td>
+        <td class="tier-premium">&#10003;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>Mutual fund NAV, company news</td>
+        <td class="tier-free">&#10003;</td>
+        <td class="tier-premium">&#10003;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>Portfolio management (add/remove/view)</td>
+        <td class="tier-free">&#10003;</td>
+        <td class="tier-premium">&#10003;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>Fundamentals, technicals, shareholding</td>
+        <td style="color:#475569">&#10007;</td>
+        <td class="tier-premium">&#10003;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>RBI macro indicators, filings</td>
+        <td style="color:#475569">&#10007;</td>
+        <td class="tier-premium">&#10003;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>Cross-source signals, research briefs</td>
+        <td style="color:#475569">&#10007;</td>
+        <td style="color:#475569">&#10007;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>Portfolio risk report (CrewAI)</td>
+        <td style="color:#475569">&#10007;</td>
+        <td style="color:#475569">&#10007;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>Earnings verdict (CrewAI)</td>
+        <td style="color:#475569">&#10007;</td>
+        <td style="color:#475569">&#10007;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td>Deep filings (document parse)</td>
+        <td style="color:#475569">&#10007;</td>
+        <td style="color:#475569">&#10007;</td>
+        <td class="tier-analyst">&#10003;</td>
+      </tr>
+      <tr>
+        <td><strong>Rate limit</strong></td>
+        <td class="tier-free">30/hr</td>
+        <td class="tier-premium">150/hr</td>
+        <td class="tier-analyst">500/hr</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background: #818cf8;"></div> Client Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #fbbf24;"></div> Auth / Middleware</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #34d399;"></div> Server Routes</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #38bdf8;"></div> Tool Modules</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #c084fc;"></div> CrewAI Crews</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #f472b6;"></div> Trust Score</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #fb923c;"></div> Data Facade</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #4ade80;"></div> External APIs</div>
+  <div class="legend-item"><div class="legend-dot" style="background: #60a5fa;"></div> Database</div>
+</div>
+
+</body>
+</html>

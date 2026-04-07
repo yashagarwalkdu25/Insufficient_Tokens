@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>generate_research_brief — Full Execution Trace</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0e1a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;padding:32px;line-height:1.6}
+h1{text-align:center;font-size:26px;background:linear-gradient(135deg,#818cf8,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}
+.sub{text-align:center;color:#64748b;font-size:13px;margin-bottom:40px}
+.container{max-width:1100px;margin:0 auto}
+
+/* Phase blocks */
+.phase{margin-bottom:32px;border:1px solid rgba(255,255,255,0.06);border-radius:14px;overflow:hidden}
+.phase-header{padding:14px 20px;display:flex;align-items:center;gap:12px}
+.phase-num{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0}
+.phase-title{font-size:16px;font-weight:700}
+.phase-file{font-size:11px;font-family:'SF Mono','Fira Code',monospace;opacity:0.5;margin-left:auto}
+.phase-body{padding:0 20px 20px 64px}
+
+/* Colors */
+.p-blue .phase-header{background:rgba(99,102,241,0.08)}
+.p-blue .phase-num{background:#818cf8;color:#0a0e1a}
+.p-blue .phase-title{color:#818cf8}
+
+.p-yellow .phase-header{background:rgba(251,191,36,0.06)}
+.p-yellow .phase-num{background:#fbbf24;color:#0a0e1a}
+.p-yellow .phase-title{color:#fbbf24}
+
+.p-green .phase-header{background:rgba(16,185,129,0.06)}
+.p-green .phase-num{background:#34d399;color:#0a0e1a}
+.p-green .phase-title{color:#34d399}
+
+.p-purple .phase-header{background:rgba(192,132,252,0.08)}
+.p-purple .phase-num{background:#c084fc;color:#0a0e1a}
+.p-purple .phase-title{color:#c084fc}
+
+.p-orange .phase-header{background:rgba(251,146,60,0.06)}
+.p-orange .phase-num{background:#fb923c;color:#0a0e1a}
+.p-orange .phase-title{color:#fb923c}
+
+.p-pink .phase-header{background:rgba(244,114,182,0.06)}
+.p-pink .phase-num{background:#f472b6;color:#0a0e1a}
+.p-pink .phase-title{color:#f472b6}
+
+.p-cyan .phase-header{background:rgba(56,189,248,0.06)}
+.p-cyan .phase-num{background:#38bdf8;color:#0a0e1a}
+.p-cyan .phase-title{color:#38bdf8}
+
+.p-red .phase-header{background:rgba(248,113,113,0.06)}
+.p-red .phase-num{background:#f87171;color:#0a0e1a}
+.p-red .phase-title{color:#f87171}
+
+/* Code blocks */
+code{background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:12px;font-family:'SF Mono','Fira Code',monospace}
+pre{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:14px;font-size:12px;font-family:'SF Mono','Fira Code',monospace;overflow-x:auto;margin:10px 0;line-height:1.5;color:#94a3b8}
+pre .hl{color:#c084fc}
+pre .fn{color:#34d399}
+pre .cm{color:#475569}
+pre .kw{color:#818cf8}
+pre .str{color:#fbbf24}
+pre .num{color:#fb923c}
+
+/* Trace line */
+.trace{display:flex;gap:10px;margin:8px 0;align-items:flex-start}
+.trace-arrow{color:#475569;font-size:14px;flex-shrink:0;margin-top:2px}
+.trace-text{font-size:13px;color:#cbd5e1}
+.trace-text strong{color:#e2e8f0}
+
+/* Agent cards */
+.agents{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:12px 0}
+.agent-card{border:1px solid rgba(192,132,252,0.2);background:rgba(192,132,252,0.04);border-radius:10px;padding:12px}
+.agent-name{font-weight:700;font-size:13px;color:#c084fc;margin-bottom:4px}
+.agent-llm{font-size:10px;color:#64748b;margin-bottom:6px;font-family:monospace}
+.agent-tools{font-size:11px;color:#94a3b8}
+.agent-tools span{display:inline-block;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.2);border-radius:4px;padding:1px 6px;margin:2px 2px 2px 0;font-size:10px;color:#38bdf8}
+.parallel-badge{display:inline-block;background:rgba(74,222,128,0.12);color:#4ade80;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:6px}
+.sequential-badge{display:inline-block;background:rgba(251,191,36,0.12);color:#fbbf24;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:6px}
+
+/* Data flow */
+.data-flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0}
+.df-box{padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600}
+.df-arrow{color:#475569;font-size:14px}
+.df-hit{background:rgba(74,222,128,0.1);color:#4ade80;border:1px solid rgba(74,222,128,0.2)}
+.df-miss{background:rgba(248,113,113,0.1);color:#f87171;border:1px solid rgba(248,113,113,0.2)}
+.df-api{background:rgba(56,189,248,0.1);color:#38bdf8;border:1px solid rgba(56,189,248,0.2)}
+.df-cache{background:rgba(251,191,36,0.1);color:#fbbf24;border:1px solid rgba(251,191,36,0.2)}
+.df-stale{background:rgba(251,146,60,0.1);color:#fb923c;border:1px solid rgba(251,146,60,0.2)}
+
+/* Trust formula */
+.formula{background:rgba(244,114,182,0.06);border:1px solid rgba(244,114,182,0.15);border-radius:10px;padding:14px;margin:10px 0;font-family:'SF Mono','Fira Code',monospace;font-size:13px;color:#f472b6}
+
+/* Output */
+.output{background:rgba(16,185,129,0.04);border:1px solid rgba(16,185,129,0.15);border-radius:10px;padding:14px;margin:10px 0}
+.output-key{color:#34d399;font-weight:700;font-size:12px}
+.output-val{color:#94a3b8;font-size:12px;margin-left:8px}
+
+/* Summary */
+.summary{margin-top:40px;border:1px solid rgba(192,132,252,0.15);border-radius:14px;padding:20px;background:rgba(192,132,252,0.03)}
+.summary h2{color:#c084fc;font-size:18px;margin-bottom:12px}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.summary-item{font-size:13px}
+.summary-label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.summary-value{color:#e2e8f0;font-weight:600;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>generate_research_brief("RELIANCE")</h1>
+<p class="sub">Complete execution trace &mdash; from HTTP request to final JSON response</p>
+
+<!-- ============================================================ -->
+<!-- PHASE 1: HTTP Request -->
+<!-- ============================================================ -->
+<div class="phase p-blue">
+  <div class="phase-header">
+    <div class="phase-num">1</div>
+    <div class="phase-title">HTTP Request Arrives</div>
+    <div class="phase-file">server.py:270</div>
+  </div>
+  <div class="phase-body">
+    <pre>POST /api/tool/generate_research_brief HTTP/1.1
+Host: localhost:10004
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+
+{ <span class="str">"symbol"</span>: <span class="str">"RELIANCE"</span> }</pre>
+
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Enters <code>rest_tool_bridge(request)</code> — the universal REST-to-MCP bridge</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Extracts <code>tool_name = "generate_research_brief"</code> from URL path</span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 2: Auth Pipeline -->
+<!-- ============================================================ -->
+<div class="phase p-yellow">
+  <div class="phase-header">
+    <div class="phase-num">2</div>
+    <div class="phase-title">Auth &amp; Middleware Pipeline</div>
+    <div class="phase-file">server.py:282 → auth/</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 2a — JWT Extraction:</strong> Splits <code>Authorization: Bearer &lt;token&gt;</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 2b — JWT Validation:</strong> <code>_auth_provider.validate_token(token)</code> fetches JWKS from <code>http://keycloak:8080/realms/finint/protocol/openid-connect/certs</code>, verifies RS256 signature, checks <code>iss</code> matches <code>http://localhost:10003/realms/finint</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Returns <code>TokenClaims(user_id, tier="analyst", scopes=["research:generate", ...])</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 2c — Scope Check:</strong> <code>_tier_filter.is_tool_allowed("generate_research_brief", claims)</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">Looks up: <code>TOOL_SCOPE_MAP["generate_research_brief"] = "research:generate"</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">Checks: <code>"research:generate" ∈ claims.scopes</code> → <strong style="color:#4ade80">✓ ALLOWED</strong> (Analyst tier has this scope)</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 2d — Rate Limit:</strong> <code>rl.check_rate_limit(user_id, "analyst")</code> — Redis sliding window, 500/hr limit</span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>INCR finint:rl:{user_id}:analyst</code> → count=47 → <strong style="color:#4ade80">✓ UNDER LIMIT</strong></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 2e — Audit Log:</strong> <code>_audit_logger.log_tool_call(user_id, "analyst", "generate_research_brief")</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>INSERT INTO audit_log (user_id, tier, tool_name, timestamp) VALUES (...)</code></span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 3: MCP Tool Call -->
+<!-- ============================================================ -->
+<div class="phase p-green">
+  <div class="phase-header">
+    <div class="phase-num">3</div>
+    <div class="phase-title">MCP Tool Dispatch</div>
+    <div class="phase-file">server.py:384 → cross_source/tools.py:177</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>mcp.call_tool("generate_research_brief", {"symbol": "RELIANCE"})</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">FastMCP finds the registered tool function and calls it</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Enters <code>generate_research_brief(symbol="RELIANCE")</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>First action:</strong> calls <code>run_research_crew("RELIANCE")</code></span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 4: Research Crew Init -->
+<!-- ============================================================ -->
+<div class="phase p-purple">
+  <div class="phase-header">
+    <div class="phase-num">4</div>
+    <div class="phase-title">CrewAI Research Crew — Initialization</div>
+    <div class="phase-file">crews/research_crew.py:332</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 4a — API Key Check:</strong> <code>settings.openai_api_key</code> is set → ✓ proceed</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 4b — Cache Check:</strong> <code>research_cache_repo.get_cached("research:RELIANCE")</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>SELECT analysis_json FROM cached_research WHERE cache_key = 'research:RELIANCE' AND expires_at > NOW()</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">Result: <strong style="color:#f87171">NULL</strong> (no cache or expired) → must run crew</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 4c — Set OpenAI Key:</strong> <code>os.environ["OPENAI_API_KEY"] = settings.openai_api_key</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 4d — Build Crew:</strong> <code>_build_research_crew("RELIANCE")</code></span></div>
+
+    <p style="font-size:13px;color:#94a3b8;margin:12px 0 8px">Creates 5 agents and 5 tasks:</p>
+
+    <div class="agents">
+      <div class="agent-card">
+        <div class="agent-name">1. Market Data Collector <span class="parallel-badge">PARALLEL</span></div>
+        <div class="agent-llm">LLM: openai/gpt-4o-mini</div>
+        <div class="agent-tools">Tools: <span>StockQuoteTool</span> <span>ShareholdingTool</span></div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-name">2. Fundamental Analyst <span class="parallel-badge">PARALLEL</span></div>
+        <div class="agent-llm">LLM: openai/gpt-4o</div>
+        <div class="agent-tools">Tools: <span>FundamentalsTool</span></div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-name">3. News Sentiment Analyst <span class="parallel-badge">PARALLEL</span></div>
+        <div class="agent-llm">LLM: openai/gpt-4o-mini</div>
+        <div class="agent-tools">Tools: <span>NewsTool</span></div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-name">4. Macro &amp; Risk Analyst <span class="parallel-badge">PARALLEL</span></div>
+        <div class="agent-llm">LLM: openai/gpt-4o</div>
+        <div class="agent-tools">Tools: <span>MacroTool</span></div>
+      </div>
+      <div class="agent-card" style="border-color:rgba(251,191,36,0.3);background:rgba(251,191,36,0.04)">
+        <div class="agent-name" style="color:#fbbf24">5. Research Synthesizer <span class="sequential-badge">SEQUENTIAL</span></div>
+        <div class="agent-llm">LLM: openai/gpt-4o</div>
+        <div class="agent-tools">Tools: <em style="color:#64748b">None (receives context from all 4 above)</em></div>
+      </div>
+    </div>
+
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 4e — Kickoff:</strong> <code>await asyncio.to_thread(crew.kickoff)</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><em>Moves crew execution to a ThreadPoolExecutor thread (CrewAI is sync internally)</em></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">CrewAI generates an execution plan first (<code>planning=True</code>)</span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 5: Parallel Agent Execution -->
+<!-- ============================================================ -->
+<div class="phase p-cyan">
+  <div class="phase-header">
+    <div class="phase-num">5</div>
+    <div class="phase-title">4 Agents Execute in Parallel</div>
+    <div class="phase-file">CrewAI ThreadPool → DataFacade</div>
+  </div>
+  <div class="phase-body">
+    <p style="font-size:13px;color:#94a3b8;margin-bottom:12px">All 4 tasks have <code>async_execution=True</code> so CrewAI runs them concurrently. Each agent calls its tools, which hit the DataFacade:</p>
+
+    <p style="font-size:13px;font-weight:700;color:#38bdf8;margin:14px 0 6px">Agent 1: Market Data Collector</p>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">GPT-4o-mini decides to call <code>get_stock_quote("RELIANCE")</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>StockQuoteTool._run("RELIANCE")</code> → <code>_run_async(data_facade.get_price("RELIANCE"))</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">Creates new event loop (no loop exists in ThreadPool) → runs async coroutine → closes loop</span></div>
+    <div class="data-flow">
+      <div class="df-box df-miss">L1 miss</div><span class="df-arrow">→</span>
+      <div class="df-box df-miss">L2 miss</div><span class="df-arrow">→</span>
+      <div class="df-box df-api">Angel One API</div><span class="df-arrow">→</span>
+      <div class="df-box df-cache">Cache (TTL 30s)</div><span class="df-arrow">→</span>
+      <div class="df-box df-hit">Return JSON</div>
+    </div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Returns: <code>{"ltp": 2456.50, "change_pct": 2.3, "volume": 8500000, "_source": "angel_one"}</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">GPT-4o-mini then calls <code>get_shareholding("RELIANCE")</code></span></div>
+    <div class="data-flow">
+      <div class="df-box df-miss">L1 miss</div><span class="df-arrow">→</span>
+      <div class="df-box df-miss">L2 miss</div><span class="df-arrow">→</span>
+      <div class="df-box df-api">BSE India API</div><span class="df-arrow">→</span>
+      <div class="df-box df-cache">Cache (TTL 7d)</div><span class="df-arrow">→</span>
+      <div class="df-box df-hit">Return JSON</div>
+    </div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Agent writes output: <em>"LTP ₹2,456.50 (+2.3%) [Source: Angel One], Promoter: 50.3% [Source: BSE India]"</em></span></div>
+
+    <p style="font-size:13px;font-weight:700;color:#38bdf8;margin:18px 0 6px">Agent 2: Fundamental Analyst</p>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">GPT-4o decides to call <code>get_fundamentals("RELIANCE")</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>FundamentalsTool._run("RELIANCE")</code> → <code>data_facade.get_fundamentals("RELIANCE")</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">ISIN mapper: RELIANCE → <code>alpha_vantage_ticker = "RELIANCE.BSE"</code></span></div>
+    <div class="data-flow">
+      <div class="df-box df-miss">L1 miss</div><span class="df-arrow">→</span>
+      <div class="df-box df-hit">L2 HIT ✓</div><span class="df-arrow">→</span>
+      <div class="df-box df-cache">Return cached (set 3h ago, TTL 24h)</div>
+    </div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Returns: <code>{"pe_ratio": 28.5, "roe": 12.8, "debt_equity": 0.45, "_source": "alpha_vantage"}</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Agent writes: <em>"P/E: 28.5 [Source: Alpha Vantage], ROE: 12.8% [Source: Alpha Vantage]"</em></span></div>
+
+    <p style="font-size:13px;font-weight:700;color:#38bdf8;margin:18px 0 6px">Agent 3: News Sentiment Analyst</p>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">GPT-4o-mini calls <code>get_company_news("RELIANCE")</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>NewsTool._run("RELIANCE")</code> → <code>data_facade.get_news("RELIANCE", days=7)</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">ISIN mapper: RELIANCE → company_name = "Reliance Industries Limited"</span></div>
+    <div class="data-flow">
+      <div class="df-box df-miss">L1 miss</div><span class="df-arrow">→</span>
+      <div class="df-box df-miss">L2 miss</div><span class="df-arrow">→</span>
+      <div class="df-box df-api">Finnhub API</div><span class="df-arrow">→</span>
+      <div class="df-box df-cache">Cache (TTL 15m)</div><span class="df-arrow">→</span>
+      <div class="df-box df-hit">Return JSON</div>
+    </div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Returns: <code>{"articles": [{title, source, sentiment_score}, ...], "_source": "finnhub"}</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Agent writes: <em>"Sentiment: +0.35 from 12 articles [Source: Finnhub]. Key: 'Reliance Jio adds 8M subscribers'"</em></span></div>
+
+    <p style="font-size:13px;font-weight:700;color:#38bdf8;margin:18px 0 6px">Agent 4: Macro &amp; Risk Analyst</p>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">GPT-4o calls <code>get_macro_data()</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>MacroTool._run()</code> → <code>data_facade.get_macro()</code></span></div>
+    <div class="data-flow">
+      <div class="df-box df-hit">L1 HIT ✓</div><span class="df-arrow">→</span>
+      <div class="df-box df-cache">Return instantly (cached 2 days ago, TTL 7 days)</div>
+    </div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Returns: <code>{"repo_rate": 6.5, "cpi_inflation_pct": 4.2, "usd_inr": 83.4, "_source": "rbi_dbie"}</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Agent writes: <em>"Repo rate 6.5% [Source: RBI DBIE] — neutral for O&G sector"</em></span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 6: Synthesis -->
+<!-- ============================================================ -->
+<div class="phase p-purple">
+  <div class="phase-header">
+    <div class="phase-num">6</div>
+    <div class="phase-title">Synthesizer Agent — Sequential (waits for all 4)</div>
+    <div class="phase-file">CrewAI → GPT-4o</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">CrewAI passes all 4 task outputs as <code>context</code> to the Synthesizer</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">GPT-4o reads all findings and produces a <code>CrossSourceAnalysisOutput</code> (Pydantic model):</span></div>
+
+    <pre>{
+  <span class="str">"symbol"</span>: <span class="str">"RELIANCE"</span>,
+  <span class="str">"signals"</span>: [
+    {<span class="str">"source"</span>: <span class="str">"Angel One"</span>, <span class="str">"signal_type"</span>: <span class="str">"price"</span>, <span class="str">"direction"</span>: <span class="num">0.5</span>, <span class="str">"confidence"</span>: <span class="num">0.85</span>,
+     <span class="str">"evidence"</span>: <span class="str">"LTP ₹2,456.50 (+2.3% today)"</span>},
+    {<span class="str">"source"</span>: <span class="str">"Alpha Vantage"</span>, <span class="str">"signal_type"</span>: <span class="str">"fundamental"</span>, <span class="str">"direction"</span>: <span class="num">0.3</span>, <span class="str">"confidence"</span>: <span class="num">0.7</span>,
+     <span class="str">"evidence"</span>: <span class="str">"P/E: 28.5, ROE: 12.8% — moderate vs sector"</span>},
+    {<span class="str">"source"</span>: <span class="str">"Finnhub"</span>, <span class="str">"signal_type"</span>: <span class="str">"sentiment"</span>, <span class="str">"direction"</span>: <span class="num">0.35</span>, <span class="str">"confidence"</span>: <span class="num">0.6</span>,
+     <span class="str">"evidence"</span>: <span class="str">"Sentiment +0.35 from 12 articles"</span>},
+    {<span class="str">"source"</span>: <span class="str">"RBI DBIE"</span>, <span class="str">"signal_type"</span>: <span class="str">"macro"</span>, <span class="str">"direction"</span>: <span class="num">0.1</span>, <span class="str">"confidence"</span>: <span class="num">0.5</span>,
+     <span class="str">"evidence"</span>: <span class="str">"Repo rate 6.5%, CPI 4.2% — neutral for O&G"</span>}
+  ],
+  <span class="str">"contradictions"</span>: [],
+  <span class="str">"synthesis"</span>: <span class="str">"Cross-source analysis for RELIANCE: All 4 signals broadly aligned..."</span>,
+  <span class="str">"overall_confidence"</span>: <span class="num">0.66</span>,
+  <span class="str">"citations"</span>: [...],
+  <span class="str">"disclaimer"</span>: <span class="str">"AI-generated analysis. Not investment advice."</span>
+}</pre>
+
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Pydantic validates the output (<code>output_pydantic=CrossSourceAnalysisOutput</code>)</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>result.pydantic.model_dump()</code> → Python dict</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Cache result:</strong> <code>research_cache_repo.set_cached("research:RELIANCE", output, ttl=3600)</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>INSERT INTO cached_research (cache_key, analysis_json, expires_at) VALUES (...)</code></span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 7: Back in generate_research_brief -->
+<!-- ============================================================ -->
+<div class="phase p-green">
+  <div class="phase-header">
+    <div class="phase-num">7</div>
+    <div class="phase-title">Back in generate_research_brief — Enrich &amp; Add Trust</div>
+    <div class="phase-file">cross_source/tools.py:189-214</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>run_research_crew()</code> returned successfully, no <code>"error"</code> key</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Fetch shareholding:</strong> <code>data_facade.get_shareholding("RELIANCE", quarters=2)</code></span></div>
+    <div class="data-flow">
+      <div class="df-box df-hit">L1 HIT ✓</div><span class="df-arrow">→</span>
+      <div class="df-box df-cache">Return (Agent 1 already cached this)</div>
+    </div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Assemble brief_data dict:</strong> symbol + title + signals + contradictions + shareholding + synthesis + citations</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Attach trust score:</strong> <code>_attach_trust_research(brief_data)</code></span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 8: Trust Score Pipeline -->
+<!-- ============================================================ -->
+<div class="phase p-pink">
+  <div class="phase-header">
+    <div class="phase-num">8</div>
+    <div class="phase-title">Deterministic Trust Score Pipeline (No LLM)</div>
+    <div class="phase-file">cross_source/__init__.py → signal_normalizer → conflict_detector → trust_scorer</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Step 8a — compute_trust_envelope(signals, context="research")</strong></span></div>
+
+    <p style="font-size:13px;font-weight:700;color:#f472b6;margin:12px 0 6px">8b: Signal Normalizer</p>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>normalize_rows(signals)</code> — maps each signal to a canonical form:</span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>signal_type "price"</code> → <code>logical_name "price_trend"</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>signal_type "fundamental"</code> → <code>logical_name "fundamental_strength"</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>signal_type "sentiment"</code> → <code>logical_name "news_sentiment"</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>signal_type "macro"</code> → <code>logical_name "macro_support"</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>direction_to_polarity()</code>: direction &gt; 0.15 = "bullish", &lt; -0.15 = "bearish", else "neutral"</span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">price 0.5 → <strong>bullish</strong>, fundamental 0.3 → <strong>bullish</strong>, sentiment 0.35 → <strong>bullish</strong>, macro 0.1 → <strong>neutral</strong></span></div>
+
+    <p style="font-size:13px;font-weight:700;color:#f472b6;margin:12px 0 6px">8c: Conflict Detector</p>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>build_evidence_and_conflicts(normalized, "research")</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Expected signals for research context: <code>["price_trend", "fundamental_strength", "news_sentiment", "macro_support"]</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">For each expected signal, check how many sources provide it:</span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>price_trend</code>: 1 source (Angel One) → <strong>"weakly_supported"</strong></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>fundamental_strength</code>: 1 source (Alpha Vantage) → <strong>"weakly_supported"</strong></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>news_sentiment</code>: 1 source (Finnhub) → <strong>"weakly_supported"</strong></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><code>macro_support</code>: 1 source (RBI DBIE) → <strong>"weakly_supported"</strong></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><strong>Cross-topic conflict check:</strong></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">price_trend=bullish vs news_sentiment=bullish → <strong style="color:#4ade80">NO CONFLICT</strong> (aligned)</span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">fundamental_strength=bullish vs news_sentiment=bullish → <strong style="color:#4ade80">NO CONFLICT</strong> (aligned)</span></div>
+
+    <p style="font-size:13px;font-weight:700;color:#f472b6;margin:12px 0 6px">8d: Trust Scorer</p>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>build_trust_payload(evidence_matrix, conflicts)</code></span></div>
+    <div class="formula">
+      score = 50 (base)<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ 10 × 0 confirmed = 0<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ &nbsp;5 × 0 multi-source = 0<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ &nbsp;5 × 4 weakly_supported = <strong>+20</strong><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- 12 × 0 conflicts = 0<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- &nbsp;5 × 0 missing = 0<br>
+      <strong>= 70 / 100</strong>
+    </div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Generates reasoning lines: <em>"price_trend supported by a single source only"</em>, etc.</span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 9: Final Response -->
+<!-- ============================================================ -->
+<div class="phase p-green">
+  <div class="phase-header">
+    <div class="phase-num">9</div>
+    <div class="phase-title">Final JSON Response to Client</div>
+    <div class="phase-file">server.py:384-403</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>generate_research_brief()</code> returns the enriched dict</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text"><code>rest_tool_bridge</code> extracts text from MCP ToolResult content</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Parses as JSON and returns <code>JSONResponse</code></span></div>
+
+    <pre>{
+  <span class="str">"data"</span>: {
+    <span class="str">"symbol"</span>: <span class="str">"RELIANCE"</span>,
+    <span class="str">"title"</span>: <span class="str">"Research Brief: RELIANCE"</span>,
+    <span class="str">"signals"</span>: [<span class="cm">/* 4 signal objects with source, direction, confidence, evidence */</span>],
+    <span class="str">"contradictions"</span>: [],
+    <span class="str">"shareholding_snapshot"</span>: {<span class="cm">/* promoter %, FII %, DII % */</span>},
+    <span class="str">"synthesis"</span>: <span class="str">"Cross-source analysis for RELIANCE: All 4 signals broadly aligned..."</span>,
+    <span class="str">"overall_confidence"</span>: <span class="num">0.66</span>,
+    <span class="str">"citations"</span>: [<span class="cm">/* source, data_point, value per finding */</span>],
+    <span class="str">"generated_at"</span>: <span class="str">"2026-04-07T10:30:00Z"</span>,
+    <span class="hl">"trust_score"</span>: <span class="num">70</span>,
+    <span class="hl">"signal_summary"</span>: {<span class="str">"confirmations"</span>: <span class="num">0</span>, <span class="str">"contradictions"</span>: <span class="num">0</span>, <span class="str">"missing"</span>: <span class="num">0</span>},
+    <span class="hl">"conflicts"</span>: [],
+    <span class="hl">"evidence_matrix"</span>: [<span class="cm">/* 4 rows: weakly_supported × 4 */</span>],
+    <span class="hl">"trust_score_reasoning"</span>: [<span class="str">"price_trend supported by a single source only"</span>, ...]
+  },
+  <span class="str">"source"</span>: <span class="str">"crewai_research_crew"</span>,
+  <span class="str">"cache_status"</span>: <span class="str">"miss"</span>,
+  <span class="str">"timestamp"</span>: <span class="str">"2026-04-07T10:30:00Z"</span>,
+  <span class="str">"disclaimer"</span>: <span class="str">"AI-generated research brief from multiple sources. Not investment advice."</span>
+}</pre>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 10: Fallback Path -->
+<!-- ============================================================ -->
+<div class="phase p-red">
+  <div class="phase-header">
+    <div class="phase-num">F</div>
+    <div class="phase-title">Fallback Path (if CrewAI fails)</div>
+    <div class="phase-file">cross_source/tools.py:220-248</div>
+  </div>
+  <div class="phase-body">
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">If <code>run_research_crew()</code> returns <code>{"error": ...}</code> or throws an exception:</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Falls through to <strong>heuristic path</strong>: calls <code>cross_reference_signals(symbol)</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">Which calls DataFacade directly (no LLM): get_price + get_fundamentals + get_news + get_macro</span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text">Builds signals using <strong>rule-based scoring</strong>: change_pct > 1% → direction 0.5, ROE > 15% → direction 0.6, etc.</span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Also fetches shareholding: <code>data_facade.get_shareholding(symbol, quarters=2)</code></span></div>
+    <div class="trace"><span class="trace-arrow">→</span><span class="trace-text">Attaches trust score and returns with <code>"source": "cross_source_heuristic"</code></span></div>
+    <div class="trace"><span class="trace-arrow">&nbsp;&nbsp;</span><span class="trace-text"><em>No OpenAI calls needed — works even without API key</em></span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SUMMARY -->
+<!-- ============================================================ -->
+<div class="summary">
+  <h2>Execution Summary</h2>
+  <div class="summary-grid">
+    <div class="summary-item">
+      <div class="summary-label">Total External API Calls</div>
+      <div class="summary-value">4-6 (price, fundamentals, news, macro, shareholding + OpenAI × ~8 LLM calls)</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Cache Interactions</div>
+      <div class="summary-value">L1 check × 5, L2 check × 5, Redis SET × 3-4, Postgres INSERT × 1</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">OpenAI LLM Calls</div>
+      <div class="summary-value">~8 total: 4 agents × ~1-2 calls each (tool use + reasoning) + 1 planning call</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Estimated Execution Time</div>
+      <div class="summary-value">30-60 seconds (dominated by OpenAI latency)</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Files Touched</div>
+      <div class="summary-value">server.py → auth/ → cross_source/tools.py → crews/research_crew.py → data_facade/ → adapters/ → cross_source/ (trust)</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Database Writes</div>
+      <div class="summary-value">1 audit_log INSERT + 1 cached_research INSERT</div>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
