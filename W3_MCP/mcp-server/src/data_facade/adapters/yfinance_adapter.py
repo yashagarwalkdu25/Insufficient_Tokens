@@ -198,12 +198,32 @@ class YFinanceAdapter:
             dii = (pct_held_institutions or 0.0) * 0.4
             retail = max(0.0, 100.0 - promoter - fii - dii)
 
+            # If all values are 0 or only retail is 100%, the data is unreliable
+            if promoter == 0 and fii == 0 and dii == 0:
+                result["entries"] = [{
+                    "quarter": "latest",
+                    "promoter": None,
+                    "fii": None,
+                    "dii": None,
+                    "retail": None,
+                    "data_note": "Shareholding data unavailable from yfinance for this stock. Check BSE/NSE for official data.",
+                }]
+            else:
+                result["entries"] = [{
+                    "quarter": "latest",
+                    "promoter": round(promoter, 2),
+                    "fii": round(fii, 2),
+                    "dii": round(dii, 2),
+                    "retail": round(retail, 2),
+                }]
+        else:
             result["entries"] = [{
                 "quarter": "latest",
-                "promoter": round(promoter, 2),
-                "fii": round(fii, 2),
-                "dii": round(dii, 2),
-                "retail": round(retail, 2),
+                "promoter": None,
+                "fii": None,
+                "dii": None,
+                "retail": None,
+                "data_note": "Shareholding data unavailable from yfinance for this stock. Check BSE/NSE for official data.",
             }]
 
         return result

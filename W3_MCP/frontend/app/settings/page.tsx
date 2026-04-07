@@ -2,68 +2,81 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import type { LucideIcon } from "lucide-react";
 import { Settings, ArrowUpCircle, CheckCircle2, Server, Loader2, Shield, Zap, Crown, Check, X } from "lucide-react";
 import { getServerStatus, getHealthCheck } from "@/lib/mcp-client";
-import { cn, tierBadge } from "@/lib/utils";
+import { PUBLIC_TIER_ORDER, TIER, type PublicTier } from "@/lib/constants";
+import { cn, tierBadge, TIER_CONFIG } from "@/lib/utils";
 
-const TIER_FEATURES = [
+type TierFeatureRow = { name: string } & Record<PublicTier, boolean>;
+
+const TIER_FEATURES: { category: string; features: TierFeatureRow[] }[] = [
   {
     category: "Research Copilot (PS1)",
     features: [
-      { name: "Stock quotes & price history", free: true, premium: true, analyst: true },
-      { name: "Company & market news", free: true, premium: true, analyst: true },
-      { name: "Mutual fund NAV lookup", free: true, premium: true, analyst: true },
-      { name: "Index data & gainers/losers", free: true, premium: true, analyst: true },
-      { name: "Fundamental ratios & financials", free: false, premium: true, analyst: true },
-      { name: "Technical indicators (RSI, SMA, MACD)", free: false, premium: true, analyst: true },
-      { name: "Shareholding patterns", free: false, premium: true, analyst: true },
-      { name: "News sentiment analysis", free: false, premium: true, analyst: true },
-      { name: "Cross-source signal matrix", free: false, premium: false, analyst: true },
-      { name: "AI research brief generation", free: false, premium: false, analyst: true },
+      { name: "Stock quotes & price history", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Company & market news", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Mutual fund NAV lookup", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Index data & gainers/losers", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Fundamental ratios & financials", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Technical indicators (RSI, SMA, MACD)", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Shareholding patterns", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "News sentiment analysis", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Cross-source signal matrix", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
+      { name: "AI research brief generation", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
     ],
   },
   {
     category: "Portfolio Monitor (PS2)",
     features: [
-      { name: "Add/remove holdings", free: true, premium: true, analyst: true },
-      { name: "Portfolio summary & value", free: true, premium: true, analyst: true },
-      { name: "Health check & concentration risk", free: true, premium: true, analyst: true },
-      { name: "Mutual fund overlap detection", free: false, premium: true, analyst: true },
-      { name: "Macro sensitivity analysis", free: false, premium: true, analyst: true },
-      { name: "Sentiment shift detection", free: false, premium: true, analyst: true },
-      { name: "AI portfolio risk report", free: false, premium: false, analyst: true },
-      { name: "What-if scenario simulation", free: false, premium: false, analyst: true },
+      { name: "Add/remove holdings", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Portfolio summary & value", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Health check & concentration risk", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Mutual fund overlap detection", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Macro sensitivity analysis", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Sentiment shift detection", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "AI portfolio risk report", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
+      { name: "What-if scenario simulation", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
     ],
   },
   {
     category: "Earnings Command Center (PS3)",
     features: [
-      { name: "Upcoming earnings calendar", free: true, premium: true, analyst: true },
-      { name: "Historical results dates", free: true, premium: true, analyst: true },
-      { name: "EPS history with YoY/QoQ trends", free: false, premium: true, analyst: true },
-      { name: "Pre-earnings profile (4Q + options + FII)", free: false, premium: true, analyst: true },
-      { name: "Analyst expectations (extrapolated)", free: false, premium: true, analyst: true },
-      { name: "Post-results price reaction", free: false, premium: true, analyst: true },
-      { name: "Beat/miss analysis", free: false, premium: true, analyst: true },
-      { name: "Option chain (OI, IV, PCR, max pain)", free: false, premium: true, analyst: true },
-      { name: "Cross-source earnings verdict", free: false, premium: false, analyst: true },
-      { name: "Earnings season dashboard", free: false, premium: false, analyst: true },
-      { name: "Cross-company quarterly comparison", free: false, premium: false, analyst: true },
-      { name: "Filing document access", free: false, premium: false, analyst: true },
-      { name: "AI quarterly filing parsing", free: false, premium: false, analyst: true },
+      { name: "Upcoming earnings calendar", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Historical results dates", [TIER.Free]: true, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "EPS history with YoY/QoQ trends", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Pre-earnings profile (4Q + options + FII)", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Analyst expectations (extrapolated)", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Post-results price reaction", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Beat/miss analysis", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Option chain (OI, IV, PCR, max pain)", [TIER.Free]: false, [TIER.Premium]: true, [TIER.Analyst]: true },
+      { name: "Cross-source earnings verdict", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
+      { name: "Earnings season dashboard", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
+      { name: "Cross-company quarterly comparison", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
+      { name: "Filing document access", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
+      { name: "AI quarterly filing parsing", [TIER.Free]: false, [TIER.Premium]: false, [TIER.Analyst]: true },
     ],
   },
 ];
 
-const TIER_META = [
-  { key: "free", label: "Free", icon: Shield, color: "border-emerald-500/50 bg-emerald-500/5", badge: "text-emerald-400 border-emerald-500/50", rate: "30 calls/hr", demo: "free_user / free123", tools: 14 },
-  { key: "premium", label: "Premium", icon: Zap, color: "border-blue-500/50 bg-blue-500/5", badge: "text-blue-400 border-blue-500/50", rate: "150 calls/hr", demo: "premium_user / premium123", tools: 30 },
-  { key: "analyst", label: "Analyst", icon: Crown, color: "border-amber-500/50 bg-amber-500/5", badge: "text-amber-400 border-amber-500/50", rate: "500 calls/hr", demo: "analyst_user / analyst123", tools: 44 },
+const TIER_META: {
+  key: PublicTier;
+  label: string;
+  icon: LucideIcon;
+  color: string;
+  badge: string;
+  rate: string;
+  demo: string;
+  tools: number;
+}[] = [
+  { key: TIER.Free, label: TIER_CONFIG[TIER.Free].label, icon: Shield, color: "border-emerald-500/50 bg-emerald-500/5", badge: "text-emerald-400 border-emerald-500/50", rate: "30 calls/hr", demo: "free_user / free123", tools: 14 },
+  { key: TIER.Premium, label: TIER_CONFIG[TIER.Premium].label, icon: Zap, color: "border-blue-500/50 bg-blue-500/5", badge: "text-blue-400 border-blue-500/50", rate: "150 calls/hr", demo: "premium_user / premium123", tools: 30 },
+  { key: TIER.Analyst, label: TIER_CONFIG[TIER.Analyst].label, icon: Crown, color: "border-amber-500/50 bg-amber-500/5", badge: "text-amber-400 border-amber-500/50", rate: "500 calls/hr", demo: "analyst_user / analyst123", tools: 44 },
 ];
 
 export default function SettingsPage() {
   const { data: session } = useSession();
-  const tier = (session?.tier as string) ?? "free";
+  const tier = (session?.tier as string) ?? TIER.Free;
 
   const [serverHealth, setServerHealth] = useState<string>("unknown");
   const [apiStatus, setApiStatus] = useState<Record<string, unknown> | null>(null);
@@ -101,7 +114,8 @@ export default function SettingsPage() {
     } catch { setRequestStatus("error"); }
   }
 
-  const upgradeTiers = tier === "free" ? ["premium", "analyst"] : tier === "premium" ? ["analyst"] : [];
+  const upgradeTiers: PublicTier[] =
+    tier === TIER.Free ? [TIER.Premium, TIER.Analyst] : tier === TIER.Premium ? [TIER.Analyst] : [];
 
   return (
     <div className="space-y-8 max-w-5xl">
@@ -141,7 +155,11 @@ export default function SettingsPage() {
               className="px-3 py-2 rounded-md bg-secondary border border-border text-sm"
             >
               <option value="">Select tier...</option>
-              {upgradeTiers.map((t) => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+              {upgradeTiers.map((t) => (
+                <option key={t} value={t}>
+                  {TIER_CONFIG[t].label}
+                </option>
+              ))}
             </select>
             <button
               onClick={handleUpgradeRequest}
@@ -194,15 +212,19 @@ export default function SettingsPage() {
             <thead>
               <tr className="border-b border-border bg-secondary/30">
                 <th className="text-left p-3 font-semibold">Feature</th>
-                <th className="text-center p-3 font-semibold w-20">
-                  <span className="text-emerald-400">Free</span>
-                </th>
-                <th className="text-center p-3 font-semibold w-20">
-                  <span className="text-blue-400">Premium</span>
-                </th>
-                <th className="text-center p-3 font-semibold w-20">
-                  <span className="text-amber-400">Analyst</span>
-                </th>
+                {PUBLIC_TIER_ORDER.map((col) => (
+                  <th key={col} className="text-center p-3 font-semibold w-20">
+                    <span
+                      className={cn(
+                        col === TIER.Free && "text-emerald-400",
+                        col === TIER.Premium && "text-blue-400",
+                        col === TIER.Analyst && "text-amber-400",
+                      )}
+                    >
+                      {TIER_CONFIG[col].label}
+                    </span>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -216,21 +238,20 @@ export default function SettingsPage() {
                   {cat.features.map((f) => (
                     <tr key={f.name} className="border-t border-border/50 hover:bg-secondary/20 transition-colors">
                       <td className="p-2.5 text-xs">{f.name}</td>
-                      <td className="p-2.5 text-center">
-                        {f.free
-                          ? <Check className="h-4 w-4 text-emerald-400 mx-auto" />
-                          : <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />}
-                      </td>
-                      <td className="p-2.5 text-center">
-                        {f.premium
-                          ? <Check className="h-4 w-4 text-blue-400 mx-auto" />
-                          : <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />}
-                      </td>
-                      <td className="p-2.5 text-center">
-                        {f.analyst
-                          ? <Check className="h-4 w-4 text-amber-400 mx-auto" />
-                          : <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />}
-                      </td>
+                      {PUBLIC_TIER_ORDER.map((col) => {
+                        const checkClass =
+                          col === TIER.Free ? "text-emerald-400" :
+                          col === TIER.Premium ? "text-blue-400" : "text-amber-400";
+                        return (
+                          <td key={col} className="p-2.5 text-center">
+                            {f[col] ? (
+                              <Check className={cn("h-4 w-4 mx-auto", checkClass)} />
+                            ) : (
+                              <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </>

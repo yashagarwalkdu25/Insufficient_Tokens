@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession, signIn } from "next-auth/react";
-import { Briefcase, Plus, Trash2, ShieldAlert, AlertTriangle, Loader2, Activity, Lock, TrendingUp, Globe, Newspaper, FileText, Upload } from "lucide-react";
+import { Briefcase, Plus, Trash2, ShieldAlert, AlertTriangle, Loader2, Lock, TrendingUp, Globe, Newspaper, FileText, Upload } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, formatCurrency, formatPercent, tierBadge } from "@/lib/utils";
+import { MCP_CLIENT, TIER } from "@/lib/constants";
+import { cn, formatCurrency, formatPercent, tierBadge, TIER_LEVELS, type Tier } from "@/lib/utils";
+import { TrustScorePanel } from "@/components/trust-score-panel";
 
-const TIER_LEVELS: Record<string, number> = { free: 0, premium: 1, analyst: 2 };
 
 interface Holding {
   symbol: string;
@@ -16,6 +17,7 @@ interface Holding {
   current_value?: number;
   pnl?: number;
   pnl_pct?: number;
+  sector?: string;
 }
 
 interface RiskAlert {
@@ -28,12 +30,13 @@ interface SentimentShift {
   symbol: string;
   sentiment_7d: number;
   direction: string;
+  articles_count?: number;
 }
 
 export default function PortfolioPage() {
   const { data: session, status } = useSession();
-  const tier = (session?.tier as string) ?? "free";
-  const tierLevel = TIER_LEVELS[tier] ?? 0;
+  const tier = (session?.tier as string) ?? TIER.Free;
+  const tierLevel = TIER_LEVELS[tier as Tier] ?? 0;
   const token = session?.accessToken;
 
   const [symbol, setSymbol] = useState("");
@@ -47,8 +50,6 @@ export default function PortfolioPage() {
   const [macroSensitivity, setMacroSensitivity] = useState<Record<string, unknown> | null>(null);
   const [sentimentShifts, setSentimentShifts] = useState<SentimentShift[]>([]);
   const [riskReport, setRiskReport] = useState<Record<string, unknown> | null>(null);
-  const [whatIfResult, setWhatIfResult] = useState<string>("");
-  const [scenario, setScenario] = useState("RBI cuts 25bps");
   const [loading, setLoading] = useState(false);
   const [loadingPremium, setLoadingPremium] = useState(false);
   const [loadingAnalyst, setLoadingAnalyst] = useState(false);
@@ -114,14 +115,21 @@ export default function PortfolioPage() {
     finally { setLoading(false); }
   }
 
-  async function refreshPortfolio() {
+  const refreshPortfolio = useCallback(async () => {
     try {
       const result = await callMCPTool("get_portfolio_summary", {}, token);
       const data = result.data as Record<string, unknown>;
       setHoldings((data.holdings as Holding[]) || []);
       setSummary(data);
     } catch { setError("Failed to load portfolio."); }
-  }
+  }, [token]);
+
+  // Auto-load portfolio on mount / when session is ready
+  useEffect(() => {
+    if (token) {
+      refreshPortfolio();
+    }
+  }, [token, refreshPortfolio]);
 
   async function handleHealthCheck() {
     setLoading(true); setError("");
@@ -132,7 +140,7 @@ export default function PortfolioPage() {
       setRiskScore(data.risk_score as number);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("Health check requires Premium tier.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("Health check requires Premium tier.");
       else setError("Failed to run health check.");
     } finally { setLoading(false); }
   }
@@ -151,7 +159,7 @@ export default function PortfolioPage() {
       setSentimentShifts((sentData.shifts as SentimentShift[]) || []);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("MF overlap / macro / sentiment requires Premium tier.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("MF overlap / macro / sentiment requires Premium tier.");
       else setError("Failed to run premium analysis.");
     } finally { setLoadingPremium(false); }
   }
@@ -165,21 +173,8 @@ export default function PortfolioPage() {
       setRiskReport(result.data as Record<string, unknown>);
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("Risk report requires Analyst tier.");
+      if (msg === MCP_CLIENT.Error.Forbidden) setError("Risk report requires Analyst tier.");
       else setError("Failed to generate risk report.");
-    } finally { setLoadingAnalyst(false); }
-  }
-
-  async function handleWhatIf() {
-    setLoadingAnalyst(true); setError("");
-    try {
-      const result = await callMCPTool("what_if_analysis", { scenario }, token);
-      const data = result.data as Record<string, unknown>;
-      setWhatIfResult(data.narrative as string);
-    } catch (e: unknown) {
-      const msg = (e as Error).message;
-      if (msg === "FORBIDDEN") setError("What-if analysis requires Analyst tier.");
-      else setError("Failed to run scenario analysis.");
     } finally { setLoadingAnalyst(false); }
   }
 
@@ -237,7 +232,7 @@ export default function PortfolioPage() {
       <div className="rounded-xl border border-border bg-card p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold flex items-center gap-2"><Plus className="h-4 w-4" /> Add Holding</h3>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("free"))}>Free</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Free))}>Free</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <input placeholder="Symbol" value={symbol} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSymbol(e.target.value.toUpperCase())} className="px-3 py-2 rounded-md bg-secondary border border-border text-sm w-32" />
@@ -324,6 +319,7 @@ export default function PortfolioPage() {
             <thead className="bg-secondary/50">
               <tr>
                 <th className="text-left p-3 font-medium">Symbol</th>
+                <th className="text-left p-3 font-medium hidden md:table-cell">Sector</th>
                 <th className="text-right p-3 font-medium">Qty</th>
                 <th className="text-right p-3 font-medium">Avg Price</th>
                 <th className="text-right p-3 font-medium">Current</th>
@@ -336,6 +332,7 @@ export default function PortfolioPage() {
               {holdings.map((h: Holding) => (
                 <tr key={h.symbol} className="border-t border-border">
                   <td className="p-3 font-medium">{h.symbol}</td>
+                  <td className="p-3 text-xs text-muted-foreground hidden md:table-cell">{h.sector || "—"}</td>
                   <td className="p-3 text-right">{h.quantity}</td>
                   <td className="p-3 text-right">{formatCurrency(h.avg_price)}</td>
                   <td className="p-3 text-right">{formatCurrency(h.current_price)}</td>
@@ -362,7 +359,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-emerald-400" /> Health Check &amp; Concentration Risk</h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium+</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium+</span>
               {tierLevel >= 1 ? (
                 <button onClick={handleHealthCheck} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-50">
                   {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Run Check"}
@@ -397,7 +394,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold flex items-center gap-2"><TrendingUp className="h-4 w-4 text-amber-400" /> Risk Intelligence</h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium+</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium+</span>
               {tierLevel >= 1 ? (
                 <button onClick={handlePremiumAnalysis} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
                   {loadingPremium ? <Loader2 className="h-3 w-3 animate-spin" /> : "Run Analysis"}
@@ -448,9 +445,25 @@ export default function PortfolioPage() {
               <p className="text-xs font-medium text-amber-300 flex items-center gap-1"><Newspaper className="h-3 w-3" /> Sentiment Shifts (7-day)</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                 {sentimentShifts.map((s: SentimentShift) => (
-                  <div key={s.symbol} className="p-2 rounded-lg bg-secondary/50">
+                  <div key={s.symbol} className={cn(
+                    "p-2.5 rounded-lg border",
+                    s.direction === "positive"
+                      ? "bg-emerald-500/5 border-emerald-500/20"
+                      : s.direction === "negative"
+                        ? "bg-red-500/5 border-red-500/20"
+                        : "bg-secondary/50 border-border"
+                  )}>
                     <span className="font-mono font-medium">{s.symbol}</span>
-                    <p className={cn("text-xs", s.direction === "positive" ? "text-emerald-400" : "text-red-400")}>{s.direction} ({s.sentiment_7d})</p>
+                    <p className={cn("text-xs font-medium mt-0.5",
+                      s.direction === "positive" ? "text-emerald-400" :
+                      s.direction === "negative" ? "text-red-400" :
+                      "text-muted-foreground"
+                    )}>
+                      {s.direction} ({s.sentiment_7d > 0 ? "+" : ""}{s.sentiment_7d})
+                    </p>
+                    {s.articles_count != null && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{s.articles_count} articles</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -465,7 +478,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-semibold flex items-center gap-2"><FileText className="h-4 w-4 text-purple-400" /> Cross-Source Risk Report</h3>
             <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst Only</span>
+              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst Only</span>
               {tierLevel >= 2 ? (
                 <button onClick={handleRiskReport} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
                   {loadingAnalyst ? <Loader2 className="h-3 w-3 animate-spin" /> : "Generate Report"}
@@ -482,6 +495,7 @@ export default function PortfolioPage() {
 
           {riskReport && (
             <div className="space-y-3">
+              <TrustScorePanel payload={riskReport} />
               {(riskReport.narrative as string) && (
                 <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-sm whitespace-pre-wrap">{riskReport.narrative as string}</div>
               )}
@@ -498,34 +512,6 @@ export default function PortfolioPage() {
         </div>
       )}
 
-      {/* ═══ SECTION 5 — ANALYST: What-If Simulator ═══ */}
-      {holdings.length > 0 && (
-        <div className={cn("rounded-xl border bg-card p-4 space-y-3", tierLevel >= 2 ? "border-purple-500/30" : "border-border opacity-60")}>
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold flex items-center gap-2"><Activity className="h-4 w-4 text-purple-400" /> What-If Simulator</h3>
-            <div className="flex items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst Only</span>
-            </div>
-          </div>
-
-          {tierLevel >= 2 ? (
-            <div className="flex gap-2">
-              <select value={scenario} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setScenario(e.target.value)} className="px-3 py-2 rounded-md bg-secondary border border-border text-sm flex-1">
-                <option>RBI cuts 25bps</option>
-                <option>USD/INR +5%</option>
-                <option>IT sector correction 10%</option>
-                <option>Crude oil +20%</option>
-              </select>
-              <button onClick={handleWhatIf} disabled={anyLoading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
-                {loadingAnalyst ? <Loader2 className="h-3 w-3 animate-spin" /> : "Simulate"}
-              </button>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground flex items-center gap-1"><Lock className="h-3 w-3" /> Simulate rate changes, currency moves, sector corrections. Analyst tier only.</p>
-          )}
-          {whatIfResult && <p className="text-sm bg-purple-500/10 border border-purple-500/20 rounded-lg p-3">{whatIfResult}</p>}
-        </div>
-      )}
     </div>
   );
 }

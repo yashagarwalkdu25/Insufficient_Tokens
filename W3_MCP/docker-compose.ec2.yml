@@ -1,0 +1,149 @@
+# EC2 / registry deploy: pull pre-built mcp-server + frontend images (private GitHub is fine).
+# Use: docker compose -f docker-compose.ec2.yml up -d
+# Set DOCKERHUB_USER and W3_PUBLIC_HOST in .env (see docs/DEPLOYMENT.md).
+# Public MCP/Keycloak URLs are derived ONLY from W3_PUBLIC_HOST here (not KEYCLOAK_PUBLIC_URL / OAUTH_RESOURCE_URL
+# from .env), so copying a local .env cannot point OAuth metadata at localhost on EC2.
+# Keep this file in sync with docker-compose.yml when service definitions change (except build → image).
+
+services:
+  mcp-server:
+    image: ${DOCKERHUB_USER}/w3-mcp-server:latest
+    ports: ["10004:10004"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=finint
+      - POSTGRES_USER=finint
+      - POSTGRES_PASSWORD=finint_secure_pwd_2026
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=finint
+      - KEYCLOAK_PUBLIC_URL=http://${W3_PUBLIC_HOST:-localhost}:10003
+      - MCP_SERVER_HOST=0.0.0.0
+      - MCP_SERVER_PORT=10004
+      - OAUTH_RESOURCE_URL=http://${W3_PUBLIC_HOST:-localhost}:10004
+      - MCP_SERVER_URL=http://mcp-server:10004
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LANGCHAIN_TRACING_V2=true
+      - LANGCHAIN_API_KEY=${LANGSMITH_API_KEY}
+      - LANGCHAIN_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      - LANGCHAIN_PROJECT=${LANGSMITH_PROJECT:-finint-mcp}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
+      - LANGSMITH_TRACING=true
+      - CREWAI_TRACING_ENABLED=true
+      - ALPHA_VANTAGE_KEY=${ALPHA_VANTAGE_KEY}
+      - FINNHUB_KEY=${FINNHUB_KEY}
+      - GNEWS_KEY=${GNEWS_KEY}
+      - ANGEL_ONE_API_KEY=${ANGEL_ONE_API_KEY}
+      - ANGEL_ONE_API_SECRET=${ANGEL_ONE_API_SECRET}
+      - ANGEL_ONE_CLIENT_CODE=${ANGEL_ONE_CLIENT_CODE}
+      - ANGEL_ONE_PASSWORD=${ANGEL_ONE_PASSWORD}
+      - ANGEL_ONE_TOTP_SECRET=${ANGEL_ONE_TOTP_SECRET}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:10004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - finint-network
+    restart: unless-stopped
+
+  frontend:
+    image: ${DOCKERHUB_USER}/w3-frontend:latest
+    ports: ["10005:10005"]
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    environment:
+      - PORT=10005
+      - HOSTNAME=0.0.0.0
+      # Runtime OAuth URLs — same W3_PUBLIC_HOST rule as mcp-server (ignore localhost from a copied .env).
+      - KEYCLOAK_BROWSER_URL=http://${W3_PUBLIC_HOST:-localhost}:10003
+      - NEXTAUTH_URL=http://${W3_PUBLIC_HOST:-localhost}:10005
+      # Baked at image build time for browser bundle; still set from W3_PUBLIC_HOST for SSR / consistency
+      - NEXT_PUBLIC_MCP_SERVER_URL=http://${W3_PUBLIC_HOST:-localhost}:10004
+      - NEXT_PUBLIC_KEYCLOAK_URL=http://${W3_PUBLIC_HOST:-localhost}:10003
+      - NEXT_PUBLIC_KEYCLOAK_REALM=${NEXT_PUBLIC_KEYCLOAK_REALM:-finint}
+      - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${NEXT_PUBLIC_KEYCLOAK_CLIENT_ID:-finint-dashboard}
+      - KEYCLOAK_ISSUER=http://keycloak:8080
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-finint-nextauth-secret-change-in-prod}
+      - NEXTAUTH_DEBUG=true
+    networks:
+      - finint-network
+    restart: unless-stopped
+
+  keycloak:
+    # MCP OAuth discovery (RFC 8414); see Keycloak release notes “authorization server in MCP”.
+    image: quay.io/keycloak/keycloak:26.5.0
+    command: start-dev --import-realm
+    ports: ["10003:8080"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # Issuer and login pages must match the host browsers use (set W3_PUBLIC_HOST in .env)
+      KC_HOSTNAME: ${W3_PUBLIC_HOST:-localhost}
+      KC_HOSTNAME_PORT: "10003"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '302\\|200'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - finint-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports: ["10002:6379"]
+    command: redis-server --save "" --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - finint-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    ports: ["10001:5432"]
+    environment:
+      POSTGRES_DB: finint
+      POSTGRES_USER: finint
+      POSTGRES_PASSWORD: finint_secure_pwd_2026
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finint -d finint"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - finint-network
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+networks:
+  finint-network:
+    driver: bridge

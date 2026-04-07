@@ -1,4 +1,8 @@
-"""PS1 Research Crew — 5-agent sequential pipeline for cross-source stock analysis."""
+"""PS1 Research Crew — 5-agent parallel pipeline for cross-source stock analysis.
+
+Architecture: 4 data-gathering agents run IN PARALLEL (async_execution=True),
+then a synthesizer agent runs sequentially to combine all findings.
+This cuts execution time by ~4x compared to sequential."""
 from __future__ import annotations
 
 import asyncio
@@ -225,7 +229,7 @@ def _build_research_crew(symbol: str) -> Crew:
         verbose=False,
     )
 
-    # Tasks (sequential)
+    # Tasks — first 4 run IN PARALLEL (async_execution=True)
     collect_task = Task(
         description=(
             f"Fetch real-time market data for {symbol} using your tools. Report: "
@@ -237,6 +241,7 @@ def _build_research_crew(symbol: str) -> Crew:
             "Example: 'LTP: ₹2,456 (+2.3%) [Source: yfinance, 2026-03-28]'"
         ),
         agent=data_collector,
+        async_execution=True,
     )
 
     fundamental_task = Task(
@@ -250,6 +255,7 @@ def _build_research_crew(symbol: str) -> Crew:
             "Example: 'P/E: 19.2 [Source: Alpha Vantage], ROE: 16.8% [Source: yfinance]'"
         ),
         agent=fundamental_analyst,
+        async_execution=True,
     )
 
     sentiment_task = Task(
@@ -265,6 +271,7 @@ def _build_research_crew(symbol: str) -> Crew:
             "Key: \"HDFC Bank NIM expands\" (positive, company-specific)'"
         ),
         agent=sentiment_analyst,
+        async_execution=True,
     )
 
     macro_task = Task(
@@ -279,8 +286,10 @@ def _build_research_crew(symbol: str) -> Crew:
             "Positive for banking sector (stable NIM)'"
         ),
         agent=macro_analyst,
+        async_execution=True,
     )
 
+    # Synthesis task: runs AFTER all parallel tasks complete
     synthesis_task = Task(
         description=(
             f"Synthesize ALL findings for {symbol} into a CrossSourceAnalysis. You MUST:\n"
@@ -303,6 +312,7 @@ def _build_research_crew(symbol: str) -> Crew:
         ),
         agent=synthesizer,
         output_pydantic=CrossSourceAnalysisOutput,
+        context=[collect_task, fundamental_task, sentiment_task, macro_task],
     )
 
     return Crew(
@@ -311,6 +321,7 @@ def _build_research_crew(symbol: str) -> Crew:
         process=Process.sequential,
         memory=True,
         verbose=False,
+        planning=True,
     )
 
 
@@ -321,6 +332,7 @@ def _build_research_crew(symbol: str) -> Crew:
 async def run_research_crew(symbol: str) -> dict[str, Any]:
     """Execute the full research crew for *symbol* and return structured output."""
     from ..config.settings import settings
+    from ..db import research_cache_repo
 
     if not settings.openai_api_key:
         logger.warning("research_crew.no_api_key")
@@ -330,14 +342,29 @@ async def run_research_crew(symbol: str) -> dict[str, Any]:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    # Check cache first (TTL = 1 hour)
+    cache_key = f"research:{symbol.upper()}"
+    cached = await research_cache_repo.get_cached(cache_key)
+    if cached is not None:
+        logger.info("research_crew.cache_hit", symbol=symbol)
+        cached["_cache"] = "hit"
+        return cached
+
     try:
         os.environ["OPENAI_API_KEY"] = settings.openai_api_key
         crew = _build_research_crew(symbol)
         result = await asyncio.to_thread(crew.kickoff)
 
         if hasattr(result, "pydantic") and result.pydantic:
-            return result.pydantic.model_dump()
-        return {"raw": str(result), "symbol": symbol}
+            output = result.pydantic.model_dump()
+        else:
+            output = {"raw": str(result), "symbol": symbol}
+
+        # Cache the result
+        await research_cache_repo.set_cached(
+            cache_key, "research", output, ttl_seconds=3600, symbol=symbol,
+        )
+        return output
 
     except Exception as exc:
         logger.error("research_crew.failed", symbol=symbol, error=str(exc))

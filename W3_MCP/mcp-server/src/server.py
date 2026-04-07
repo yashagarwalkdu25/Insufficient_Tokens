@@ -11,6 +11,7 @@ from typing import AsyncIterator
 
 import structlog
 from fastmcp import FastMCP
+from fastmcp.server.middleware import AuthMiddleware as MCPAuthMiddleware
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -20,9 +21,11 @@ from .config.settings import settings
 from .config.constants import ALL_SCOPES, TIER_SCOPES, TIER_FREE, TIER_PREMIUM, TIER_ANALYST
 from .tracing import init_tracing
 from .auth.provider import KeycloakAuthProvider
-from .auth.middleware import TierToolFilter, TOOL_SCOPE_MAP
+from .auth.middleware import TierToolFilter, TOOL_SCOPE_MAP, tool_scope_specs
+from .auth.mcp_keycloak import KeycloakMCPVerifier, finint_component_auth
 from .auth.rate_limiter import RateLimiter
 from .auth.audit import AuditLogger
+from .db.pool import get_pool, close_pool
 
 _auth_provider = KeycloakAuthProvider()
 _tier_filter = TierToolFilter()
@@ -75,6 +78,8 @@ mcp = FastMCP(
         "portfolio risk monitoring, and earnings intelligence. "
         "Tools are tiered: Free, Premium, and Analyst access levels."
     ),
+    auth=KeycloakMCPVerifier(),
+    middleware=[MCPAuthMiddleware(auth=finint_component_auth)],
 )
 
 
@@ -110,6 +115,8 @@ async def tool_catalog(request: Request) -> JSONResponse:
     free_scopes = set(TIER_SCOPES[TIER_FREE])
     premium_scopes = set(TIER_SCOPES[TIER_PREMIUM])
 
+    tier_rank = {"free": 0, "premium": 1, "analyst": 2}
+
     def _min_tier(scope: str) -> str:
         if scope in free_scopes:
             return "free"
@@ -117,14 +124,21 @@ async def tool_catalog(request: Request) -> JSONResponse:
             return "premium"
         return "analyst"
 
+    def _min_tier_for_spec(spec: str | tuple[str, ...]) -> str:
+        if isinstance(spec, str):
+            return _min_tier(spec)
+        tiers = [_min_tier(s) for s in spec]
+        return max(tiers, key=lambda t: tier_rank[t])
+
     tools = []
-    for tool_name, scope in sorted(TOOL_SCOPE_MAP.items()):
+    for tool_name, spec in sorted(TOOL_SCOPE_MAP.items()):
+        scopes_req = list(tool_scope_specs(tool_name))
         tools.append({
             "name": tool_name,
             "endpoint": f"/api/tool/{tool_name}",
             "method": "POST",
-            "required_scope": scope,
-            "minimum_tier": _min_tier(scope),
+            "required_scopes": scopes_req,
+            "minimum_tier": _min_tier_for_spec(spec),
             "auth": "Bearer JWT (OAuth 2.1 + PKCE via Keycloak)",
         })
 
@@ -262,20 +276,23 @@ async def rest_tool_bridge(request: Request) -> JSONResponse:
     """
     tool_name = request.path_params.get("tool_name", "")
 
+    _rm = settings.oauth_resource_metadata_url
+    _www_challenge = f'Bearer realm="finint", resource_metadata="{_rm}"'
+
     # --- AUTH: extract and validate JWT ---
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer ") or len(auth_header.split(" ", 1)) < 2:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
     token = auth_header.split(" ", 1)[1].strip()
     if not token:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
 
     try:
@@ -285,23 +302,33 @@ async def rest_tool_bridge(request: Request) -> JSONResponse:
         return JSONResponse(
             {"error": "Invalid or expired token", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", error="invalid_token", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer realm="finint", error="invalid_token", resource_metadata="{_rm}"'
+                ),
+            },
         )
 
     # --- SCOPE CHECK: does the user's tier allow this tool? ---
     if not _tier_filter.is_tool_allowed(tool_name, claims):
-        required_scope = TOOL_SCOPE_MAP.get(tool_name, "unknown")
-        log.info("rest_bridge.forbidden", tool=tool_name, tier=claims.tier, required=required_scope)
+        reqs = tool_scope_specs(tool_name)
+        scope_hint = " ".join(reqs) if reqs else "unknown"
+        log.info("rest_bridge.forbidden", tool=tool_name, tier=claims.tier, required=reqs)
         return JSONResponse(
             {
                 "error": f"Insufficient scope for tool '{tool_name}'",
                 "error_code": "FORBIDDEN",
-                "required_scope": required_scope,
+                "required_scopes": list(reqs),
                 "user_tier": claims.tier,
                 "hint": "Upgrade your tier to access this tool.",
             },
             status_code=403,
-            headers={"WWW-Authenticate": f'Bearer realm="finint", error="insufficient_scope", scope="{required_scope}"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer realm="finint", error="insufficient_scope", '
+                    f'resource_metadata="{_rm}", scope="{scope_hint}"'
+                ),
+            },
         )
 
     # --- RATE LIMIT CHECK (best-effort) ---
@@ -343,6 +370,13 @@ async def rest_tool_bridge(request: Request) -> JSONResponse:
         "portfolio_health_check", "check_concentration_risk", "check_mf_overlap",
         "check_macro_sensitivity", "detect_sentiment_shift", "portfolio_risk_report",
         "what_if_analysis", "import_portfolio",
+        # Alert & notification tools
+        "create_price_alert", "create_portfolio_risk_alert", "create_sentiment_alert",
+        "create_earnings_reminder", "get_my_alerts", "delete_alert",
+        "get_notifications", "mark_notifications_read", "check_and_trigger_alerts",
+        "generate_morning_brief",
+        # Resource subscription tools
+        "subscribe_resource", "unsubscribe_resource", "get_subscribed_updates",
     }
     if isinstance(body, dict) and tool_name in _PORTFOLIO_TOOLS:
         body["user_id"] = claims.user_id
@@ -375,20 +409,23 @@ async def rest_resource_bridge(request: Request) -> JSONResponse:
 
     Requires a valid Bearer JWT token.
     """
+    _rm = settings.oauth_resource_metadata_url
+    _www_challenge = f'Bearer realm="finint", resource_metadata="{_rm}"'
+
     # --- AUTH ---
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer ") or len(auth_header.split(" ", 1)) < 2:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
     token = auth_header.split(" ", 1)[1].strip()
     if not token:
         return JSONResponse(
             {"error": "Authentication required", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={"WWW-Authenticate": _www_challenge},
         )
     try:
         claims = await _auth_provider.validate_token(token)
@@ -397,7 +434,11 @@ async def rest_resource_bridge(request: Request) -> JSONResponse:
         return JSONResponse(
             {"error": "Invalid or expired token", "error_code": "UNAUTHORIZED"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="finint", error="invalid_token", resource_metadata="http://localhost:10004/.well-known/oauth-protected-resource"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer realm="finint", error="invalid_token", resource_metadata="{_rm}"'
+                ),
+            },
         )
 
     uri = request.query_params.get("uri", "")
@@ -432,6 +473,8 @@ def _register_tools() -> None:
     from .tools.portfolio import tools as _portfolio  # noqa: F401
     from .tools.earnings import tools as _earnings  # noqa: F401
     from .tools.cross_source import tools as _cross  # noqa: F401
+    from .tools.alerts import tools as _alerts  # noqa: F401
+    from .tools.alerts import morning_brief as _morning  # noqa: F401
     from .resources import resources as _resources  # noqa: F401
     from .prompts import prompts as _prompts  # noqa: F401
 
@@ -461,7 +504,46 @@ cors_middleware = [
     )
 ]
 
-app = mcp.http_app(path="/mcp", middleware=cors_middleware)
+_mcp_app = mcp.http_app(path="/mcp", middleware=cors_middleware)
+
+
+# ---------------------------------------------------------------------------
+# ASGI wrapper — DB pool lifecycle (lazy init + graceful shutdown)
+# ---------------------------------------------------------------------------
+
+_db_initialised = False
+
+
+async def app(scope, receive, send):  # type: ignore[no-untyped-def]
+    """Thin ASGI wrapper that ensures the DB pool is ready before requests."""
+    global _db_initialised
+    if scope["type"] == "lifespan":
+        # Delegate lifespan to the MCP app, but hook our startup/shutdown
+        async def _wrapped_receive():
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                try:
+                    await get_pool()
+                    log.info("db_pool_initialised")
+                except Exception as exc:
+                    log.error("db_pool_init_failed", error=str(exc))
+            return message
+
+        async def _wrapped_send(message):
+            if message["type"] == "lifespan.shutdown.complete":
+                await close_pool()
+                log.info("db_pool_closed")
+            await send(message)
+
+        await _mcp_app(scope, _wrapped_receive, _wrapped_send)
+    else:
+        if not _db_initialised:
+            _db_initialised = True
+            try:
+                await get_pool()
+            except Exception:
+                pass
+        await _mcp_app(scope, receive, send)
 
 
 # ---------------------------------------------------------------------------

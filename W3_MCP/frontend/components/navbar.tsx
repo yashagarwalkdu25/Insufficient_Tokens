@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signIn, signOut } from "next-auth/react";
+import { KEYCLOAK_ROLE, TIER } from "@/lib/constants";
 import { cn, tierBadge } from "@/lib/utils";
 import {
   Search,
@@ -14,21 +15,25 @@ import {
   Shield,
   User,
   UserPlus,
+  Bell,
+  Sun,
 } from "lucide-react";
 
 const tabs = [
-  { href: "/research", label: "Research Copilot", icon: Search, id: "ps1" },
-  { href: "/portfolio", label: "Portfolio Monitor", icon: Briefcase, id: "ps2" },
-  { href: "/earnings", label: "Earnings Center", icon: BarChart3, id: "ps3" },
+  { href: "/research", label: "Research", icon: Search, id: "ps1" },
+  { href: "/portfolio", label: "Portfolio", icon: Briefcase, id: "ps2" },
+  { href: "/earnings", label: "Earnings", icon: BarChart3, id: "ps3" },
+  { href: "/brief", label: "Brief", icon: Sun, id: "brief" },
+  { href: "/alerts", label: "Alerts", icon: Bell, id: "alerts" },
   { href: "/settings", label: "Settings", icon: Settings, id: "settings" },
 ];
 
 export function Navbar() {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const tier = session?.user?.tier ?? session?.tier ?? "free";
+  const tier = session?.user?.tier ?? session?.tier ?? TIER.Free;
   const roles: string[] = session?.user?.roles ?? [];
-  const isAdmin = roles.includes("admin");
+  const isAdmin = roles.includes(KEYCLOAK_ROLE.Admin);
 
   return (
     <nav className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
@@ -80,6 +85,13 @@ export function Navbar() {
           <div className="flex items-center gap-3">
             {session ? (
               <>
+                <Link
+                  href="/alerts"
+                  className="relative flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                  title="Alerts & Notifications"
+                >
+                  <Bell className="h-4 w-4" />
+                </Link>
                 <span
                   className={cn(
                     "px-2 py-0.5 rounded-full text-xs font-medium border uppercase tracking-wide",

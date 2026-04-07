@@ -186,14 +186,42 @@ class DataFacade:
         to_date = datetime.utcnow().strftime("%Y-%m-%d")
         from_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
 
+        mapping = isin_mapper.resolve(symbol)
+        company_name = mapping.company_name if mapping else symbol
+
+        # If ISIN mapper doesn't have this stock, try yfinance for the company name
+        if company_name == symbol:
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker(f"{symbol}.NS")
+                info = ticker.info or {}
+                yf_name = info.get("shortName") or info.get("longName")
+                if yf_name and yf_name != symbol:
+                    company_name = yf_name
+            except Exception:
+                pass
+
+        async def _finnhub_news():
+            result = await self.finnhub.get_company_news(symbol, from_date, to_date)
+            if "error" not in result and not result.get("articles"):
+                result["error"] = "no_articles"
+                result["error_code"] = "FINNHUB_NO_ARTICLES"
+            return result
+
+        gnews_query = (
+            f"{company_name} stock India"
+            if company_name != symbol
+            else f"{symbol} NSE BSE stock India"
+        )
+
         return await self._fallback_chain(
             data_type="news",
             identifier=f"{symbol}:{days}d",
             ttl=TTL_NEWS,
             chain=FALLBACK_CHAIN_NEWS,
             call_map={
-                "finnhub": lambda: self.finnhub.get_company_news(symbol, from_date, to_date),
-                "gnews": lambda: self.gnews.search_news(f"{symbol} stock"),
+                "finnhub": _finnhub_news,
+                "gnews": lambda: self.gnews.search_news(gnews_query),
             },
         )
 
@@ -213,7 +241,7 @@ class DataFacade:
         symbol: str,
         filing_type: str = "announcements",
     ) -> dict[str, Any]:
-        mapping = isin_mapper.resolve(symbol)
+        mapping = await isin_mapper.resolve_or_discover(symbol, self.bse)
         scrip = mapping.bse_scrip_code if mapping else symbol
 
         method_map: dict[str, Any] = {
@@ -289,28 +317,57 @@ class DataFacade:
         from_date = datetime.utcnow().strftime("%Y-%m-%d")
         to_date = (datetime.utcnow() + timedelta(weeks=weeks)).strftime("%Y-%m-%d")
 
-        return await self._fallback_chain(
-            data_type="earnings",
-            identifier=f"{from_date}:{to_date}",
-            ttl=TTL_EARNINGS,
-            chain=["finnhub"],
-            call_map={
-                "finnhub": lambda: self.finnhub.get_earnings_calendar(from_date, to_date),
-            },
+        # Fetch BSE board meetings (Indian earnings) and Finnhub (global) in parallel
+        bse_result, finnhub_result = await asyncio.gather(
+            self._call_source("bse", lambda: self.bse.get_board_meetings(from_date, to_date)),
+            self._call_source("finnhub", lambda: self.finnhub.get_earnings_calendar(from_date, to_date)),
+            return_exceptions=False,
         )
+
+        combined: list[dict[str, Any]] = []
+
+        if bse_result and "error" not in bse_result:
+            bse_entries = bse_result.get("earnings", [])
+            for entry in bse_entries:
+                entry["_origin"] = "bse"
+            combined.extend(bse_entries)
+            logger.info("facade.earnings_calendar.bse", count=len(bse_entries))
+
+        if finnhub_result and "error" not in finnhub_result:
+            finnhub_entries = finnhub_result.get("earnings", [])
+            for entry in finnhub_entries:
+                entry["_origin"] = "finnhub"
+            combined.extend(finnhub_entries)
+            logger.info("facade.earnings_calendar.finnhub", count=len(finnhub_entries))
+
+        if not combined:
+            return {
+                "error": "No earnings calendar data from any source",
+                "error_code": "ALL_SOURCES_FAILED",
+                "_source": "none",
+                "_cache": "miss",
+                "_stale": False,
+            }
+
+        return {
+            "earnings": combined,
+            "_source": "bse+finnhub" if bse_result and finnhub_result else ("bse" if bse_result else "finnhub"),
+            "_cache": "miss",
+            "_stale": False,
+        }
 
     async def get_shareholding(
         self,
         symbol: str,
         quarters: int = 4,
     ) -> dict[str, Any]:
-        mapping = isin_mapper.resolve(symbol)
+        mapping = await isin_mapper.resolve_or_discover(symbol, self.bse)
         scrip = mapping.bse_scrip_code if mapping else symbol
         nse = mapping.nse_symbol if mapping else symbol
 
         return await self._fallback_chain(
             data_type="shareholding",
-            identifier=f"{scrip}:q{quarters}",
+            identifier=f"{nse}:q{quarters}",
             ttl=TTL_SHAREHOLDING,
             chain=["bse", "yfinance"],
             call_map={

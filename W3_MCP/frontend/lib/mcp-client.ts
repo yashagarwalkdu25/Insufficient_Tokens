@@ -1,3 +1,5 @@
+import { MCP_CLIENT } from "./constants";
+
 const MCP_SERVER_URL = process.env.NEXT_PUBLIC_MCP_SERVER_URL || "http://localhost:10004";
 
 export interface MCPToolResult {
@@ -26,13 +28,13 @@ export async function callMCPTool(
     body: JSON.stringify(args),
   });
 
-  if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (res.status === 403) throw new Error("FORBIDDEN");
+  if (res.status === 401) throw new Error(MCP_CLIENT.Error.Unauthorized);
+  if (res.status === 403) throw new Error(MCP_CLIENT.Error.Forbidden);
   if (res.status === 429) {
     const retryAfter = res.headers.get("Retry-After") || "60";
-    throw new Error(`RATE_LIMITED:${retryAfter}`);
+    throw new Error(`${MCP_CLIENT.Prefix.RateLimited}${retryAfter}`);
   }
-  if (!res.ok) throw new Error(`MCP_ERROR:${res.status}`);
+  if (!res.ok) throw new Error(`${MCP_CLIENT.Prefix.Http}${res.status}`);
 
   return res.json();
 }
@@ -50,19 +52,19 @@ export async function fetchMCPResource(
     `${MCP_SERVER_URL}/api/resource?uri=${encodeURIComponent(uri)}`,
     { headers }
   );
-  if (!res.ok) throw new Error(`RESOURCE_ERROR:${res.status}`);
+  if (!res.ok) throw new Error(`${MCP_CLIENT.Prefix.Resource}${res.status}`);
   return res.json();
 }
 
 export async function getServerStatus(): Promise<Record<string, unknown>> {
   const res = await fetch(`${MCP_SERVER_URL}/api/status`);
-  if (!res.ok) throw new Error("STATUS_ERROR");
+  if (!res.ok) throw new Error(MCP_CLIENT.Error.Status);
   return res.json();
 }
 
 export async function getHealthCheck(): Promise<{ status: string }> {
   const res = await fetch(`${MCP_SERVER_URL}/health`);
-  if (!res.ok) throw new Error("HEALTH_ERROR");
+  if (!res.ok) throw new Error(MCP_CLIENT.Error.Health);
   const j = (await res.json()) as { status?: string };
   const raw = j.status ?? "unknown";
   return { status: raw === "healthy" ? "ok" : raw };

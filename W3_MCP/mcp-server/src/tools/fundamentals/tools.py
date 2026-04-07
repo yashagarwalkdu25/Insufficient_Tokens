@@ -58,21 +58,42 @@ async def get_key_ratios(symbol: str) -> dict[str, Any]:
         dict with keys: data, source, cache_status, timestamp, disclaimer.
     """
     result = await data_facade.get_fundamentals(symbol)
+
+    eps = result.get("eps")
+    pe_ratio = result.get("pe_ratio")
+    roe = result.get("roe")
+    dividend_yield = result.get("dividend_yield")
+
+    # Explain missing ratios for transparency
+    notes: list[str] = []
+    if eps is not None and eps < 0 and pe_ratio is None:
+        notes.append("P/E ratio is not applicable — company has negative earnings (EPS < 0).")
+    if roe is None and eps is not None and eps < 0:
+        notes.append("ROE is not available — may indicate negative equity or loss-making status.")
+    if dividend_yield is None:
+        notes.append("No dividend yield — the company may not pay dividends.")
+
+    data: dict[str, Any] = {
+        "symbol": symbol,
+        "pe_ratio": pe_ratio,
+        "pb_ratio": result.get("pb_ratio"),
+        "roe": roe,
+        "roce": result.get("roce"),
+        "debt_to_equity": result.get("debt_to_equity"),
+        "current_ratio": result.get("current_ratio"),
+        "dividend_yield": dividend_yield,
+        "ev_to_ebitda": result.get("ev_to_ebitda"),
+        "price_to_sales": result.get("price_to_sales"),
+        "eps": eps,
+        "sector": result.get("sector"),
+        "industry": result.get("industry"),
+        "sector_avg_pe": result.get("sector_avg_pe"),
+    }
+    if notes:
+        data["notes"] = notes
+
     return {
-        "data": {
-            "symbol": symbol,
-            "pe_ratio": result.get("pe_ratio"),
-            "pb_ratio": result.get("pb_ratio"),
-            "roe": result.get("roe"),
-            "roce": result.get("roce"),
-            "debt_to_equity": result.get("debt_to_equity"),
-            "current_ratio": result.get("current_ratio"),
-            "dividend_yield": result.get("dividend_yield"),
-            "ev_to_ebitda": result.get("ev_to_ebitda"),
-            "price_to_sales": result.get("price_to_sales"),
-            "eps": result.get("eps"),
-            "sector_avg_pe": result.get("sector_avg_pe"),
-        },
+        "data": data,
         "source": result.get("_source", "unknown"),
         "cache_status": result.get("_cache", "miss"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -99,12 +120,27 @@ async def get_shareholding_pattern(
         dict with keys: data, source, cache_status, timestamp, disclaimer.
     """
     result = await data_facade.get_shareholding(symbol, quarters)
+    entries = result.get("entries", [])
+
+    has_valid_data = any(
+        e.get("promoter") is not None or e.get("fii") is not None
+        for e in entries
+        if isinstance(e, dict)
+    )
+
+    data: dict[str, Any] = {
+        "symbol": symbol,
+        "quarters_requested": quarters,
+        "entries": entries[:quarters],
+    }
+    if not has_valid_data:
+        data["data_note"] = (
+            "Shareholding data is unavailable from automated sources for this stock. "
+            "Check BSE/NSE websites for official SEBI-mandated disclosures."
+        )
+
     return {
-        "data": {
-            "symbol": symbol,
-            "quarters_requested": quarters,
-            "entries": result.get("entries", []),
-        },
+        "data": data,
         "source": result.get("_source", "unknown"),
         "cache_status": result.get("_cache", "miss"),
         "timestamp": datetime.now(timezone.utc).isoformat(),

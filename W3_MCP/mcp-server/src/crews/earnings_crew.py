@@ -1,4 +1,7 @@
-"""PS3 Earnings Crew — 4-agent sequential pipeline for earnings analysis."""
+"""PS3 Earnings Crew — 4-agent parallel pipeline for earnings analysis.
+
+Architecture: fetch_task + reaction_task run IN PARALLEL (async_execution=True),
+then parse_task runs with fetch_task context, then verdict_task synthesises all."""
 from __future__ import annotations
 
 import asyncio
@@ -151,24 +154,30 @@ def _build_earnings_crew(symbol: str, quarter: str) -> Crew:
         memory=True, max_iter=10, allow_delegation=False, verbose=False,
     )
 
+    # Tasks — fetch_task + reaction_task run IN PARALLEL
     fetch_task = Task(
         description=f"Get the latest BSE quarterly result filing for {symbol}.",
         expected_output="JSON with filing metadata and key financial figures.",
         agent=filing_fetcher,
-    )
-
-    parse_task = Task(
-        description=f"Extract revenue, net profit (PAT), EPS, and operating margin from {symbol}'s filing.",
-        expected_output="JSON with structured financial data.",
-        agent=filing_parser,
+        async_execution=True,
     )
 
     reaction_task = Task(
         description=f"Get {symbol}'s stock price reaction around the result date and recent news.",
         expected_output="JSON with price changes day 0/1/2 and news sentiment.",
         agent=market_reactor,
+        async_execution=True,
     )
 
+    # parse_task depends on fetch_task output
+    parse_task = Task(
+        description=f"Extract revenue, net profit (PAT), EPS, and operating margin from {symbol}'s filing.",
+        expected_output="JSON with structured financial data.",
+        agent=filing_parser,
+        context=[fetch_task],
+    )
+
+    # Verdict task: runs AFTER all tasks complete
     verdict_task = Task(
         description=(
             f"Synthesise all findings into an EarningsVerdict for {symbol} {quarter}. "
@@ -177,13 +186,15 @@ def _build_earnings_crew(symbol: str, quarter: str) -> Crew:
         expected_output="Complete EarningsVerdict with narrative and citations.",
         agent=narrator,
         output_pydantic=EarningsVerdictOutput,
+        context=[fetch_task, parse_task, reaction_task],
     )
 
     return Crew(
         agents=[filing_fetcher, filing_parser, market_reactor, narrator],
-        tasks=[fetch_task, parse_task, reaction_task, verdict_task],
+        tasks=[fetch_task, reaction_task, parse_task, verdict_task],
         process=Process.sequential,
         memory=True, verbose=False,
+        planning=True,
     )
 
 
@@ -194,18 +205,34 @@ def _build_earnings_crew(symbol: str, quarter: str) -> Crew:
 async def run_earnings_crew(symbol: str, quarter: str = "") -> dict[str, Any]:
     """Execute the earnings crew and return a structured verdict."""
     from ..config.settings import settings
+    from ..db import research_cache_repo
 
     if not settings.openai_api_key:
         return {"error": "OPENAI_API_KEY not configured", "symbol": symbol}
 
+    # Check cache (TTL = 1 hour)
+    q = quarter or "latest"
+    cache_key = f"earnings:{symbol.upper()}:{q}"
+    cached = await research_cache_repo.get_cached(cache_key)
+    if cached is not None:
+        logger.info("earnings_crew.cache_hit", symbol=symbol)
+        cached["_cache"] = "hit"
+        return cached
+
     try:
         os.environ["OPENAI_API_KEY"] = settings.openai_api_key
-        crew = _build_earnings_crew(symbol, quarter or "latest")
+        crew = _build_earnings_crew(symbol, q)
         result = await asyncio.to_thread(crew.kickoff)
 
         if hasattr(result, "pydantic") and result.pydantic:
-            return result.pydantic.model_dump()
-        return {"raw": str(result), "symbol": symbol}
+            output = result.pydantic.model_dump()
+        else:
+            output = {"raw": str(result), "symbol": symbol}
+
+        await research_cache_repo.set_cached(
+            cache_key, "earnings", output, ttl_seconds=3600, symbol=symbol,
+        )
+        return output
 
     except Exception as exc:
         logger.error("earnings_crew.failed", symbol=symbol, error=str(exc))

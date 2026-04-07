@@ -21,9 +21,11 @@ services:
       - REDIS_PORT=6379
       - KEYCLOAK_URL=http://keycloak:8080
       - KEYCLOAK_REALM=finint
+      # Issuer URL in JWTs / OAuth discovery for clients on the host (not keycloak:8080)
+      - KEYCLOAK_PUBLIC_URL=${KEYCLOAK_PUBLIC_URL:-http://localhost:10003}
       - MCP_SERVER_HOST=0.0.0.0
       - MCP_SERVER_PORT=10004
-      - OAUTH_RESOURCE_URL=http://localhost:10004
+      - OAUTH_RESOURCE_URL=${OAUTH_RESOURCE_URL:-http://localhost:10004}
       - MCP_SERVER_URL=http://mcp-server:10004
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LANGCHAIN_TRACING_V2=true
@@ -66,22 +68,23 @@ services:
     environment:
       - PORT=10005
       - HOSTNAME=0.0.0.0
-      - NEXT_PUBLIC_MCP_SERVER_URL=http://localhost:10004
-      - NEXT_PUBLIC_KEYCLOAK_URL=http://localhost:10003
-      - NEXT_PUBLIC_KEYCLOAK_REALM=finint
-      - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=finint-dashboard
+      - NEXT_PUBLIC_MCP_SERVER_URL=${NEXT_PUBLIC_MCP_SERVER_URL:-http://localhost:10004}
+      - NEXT_PUBLIC_KEYCLOAK_URL=${NEXT_PUBLIC_KEYCLOAK_URL:-http://localhost:10003}
+      - NEXT_PUBLIC_KEYCLOAK_REALM=${NEXT_PUBLIC_KEYCLOAK_REALM:-finint}
+      - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${NEXT_PUBLIC_KEYCLOAK_CLIENT_ID:-finint-dashboard}
       - KEYCLOAK_ISSUER=http://keycloak:8080
       - KEYCLOAK_ADMIN=admin
       - KEYCLOAK_ADMIN_PASSWORD=admin
-      - NEXTAUTH_URL=http://localhost:10005
-      - NEXTAUTH_SECRET=finint-nextauth-secret-change-in-prod
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:10005}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-finint-nextauth-secret-change-in-prod}
       - NEXTAUTH_DEBUG=true
     networks:
       - finint-network
     restart: unless-stopped
 
   keycloak:
-    image: quay.io/keycloak/keycloak:24.0
+    # MCP-oriented OAuth discovery (RFC 8414); 24.x returns 404 for clients like Cursor.
+    image: quay.io/keycloak/keycloak:26.5.0
     command: start-dev --import-realm
     ports: ["10003:8080"]
     environment:

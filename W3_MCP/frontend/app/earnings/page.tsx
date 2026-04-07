@@ -5,17 +5,22 @@ import { useSession, signIn } from "next-auth/react";
 import {
   BarChart3, Calendar, Target, AlertTriangle, Loader2,
   TrendingUp, Lock, FileText, Activity, Users, ArrowUpDown,
-  Shield, Zap, Eye, ExternalLink, Star, Clock, HelpCircle,
+  Shield, Zap, Eye, Star, Clock, HelpCircle,
 } from "lucide-react";
 import { callMCPTool } from "@/lib/mcp-client";
-import { cn, tierBadge } from "@/lib/utils";
-
-const TIER_LEVELS: Record<string, number> = { free: 0, premium: 1, analyst: 2 };
+import {
+  EARNINGS_PANEL_FETCH,
+  earningsPanelIsPremium,
+  type EarningsPanelKey,
+} from "@/lib/earnings-panels";
+import { MCP_CLIENT, TIER } from "@/lib/constants";
+import { cn, tierBadge, TIER_LEVELS, type Tier } from "@/lib/utils";
+import { TrustScorePanel } from "@/components/trust-score-panel";
 
 export default function EarningsPage() {
   const { data: session, status } = useSession();
-  const tier = session?.tier ?? "free";
-  const tierLevel = TIER_LEVELS[tier] ?? 0;
+  const tier = session?.tier ?? TIER.Free;
+  const tierLevel = TIER_LEVELS[tier as Tier] ?? 0;
   const token = session?.accessToken;
 
   const [calendar, setCalendar] = useState<Record<string, unknown>[]>([]);
@@ -35,8 +40,68 @@ export default function EarningsPage() {
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
 
+  /** Panel open = show block; click again to hide and clear data (checkbox-style). */
+  const [openPanels, setOpenPanels] = useState<Partial<Record<EarningsPanelKey, boolean>>>({});
+
   function setLoad(key: string) { setLoading(key); setError(""); }
   function clearLoad() { setLoading(""); }
+
+  function setPanelData(key: EarningsPanelKey, data: Record<string, unknown> | null) {
+    switch (key) {
+      case "eps":
+        setEpsHistory(data);
+        break;
+      case "pre":
+        setPreProfile(data);
+        break;
+      case "expect":
+        setExpectations(data);
+        break;
+      case "options":
+        setOptionChain(data);
+        break;
+      case "reaction":
+        setPostReaction(data);
+        break;
+      case "avse":
+        setActualVsExpected(data);
+        break;
+      case "verdict":
+        setVerdict(data);
+        break;
+      case "dashboard":
+        setDashboard(data);
+        break;
+      case "compare":
+        setComparison(data);
+        break;
+    }
+  }
+
+  function closePanel(key: EarningsPanelKey) {
+    setOpenPanels((o: Partial<Record<EarningsPanelKey, boolean>>) => ({ ...o, [key]: false }));
+    setPanelData(key, null);
+  }
+
+  const panelBtn = (active: boolean, premium: boolean) =>
+    cn(
+      "px-3 py-1.5 rounded-md text-xs font-medium transition-colors border disabled:opacity-50",
+      premium
+        ? active
+          ? "bg-amber-500 text-white border-amber-300 ring-2 ring-amber-400/60"
+          : "bg-amber-600/80 text-white border-transparent hover:bg-amber-500"
+        : active
+          ? "bg-purple-500 text-white border-purple-300 ring-2 ring-purple-400/60"
+          : "bg-purple-600 text-white border-transparent hover:bg-purple-500",
+    );
+
+  function panelButtonDisabled(key: EarningsPanelKey) {
+    const spec = EARNINGS_PANEL_FETCH[key];
+    if (openPanels[key]) return !!loading;
+    if (spec.needsCompareSymbols) return !!loading || !compareSymbols.trim();
+    if (spec.needsSymbol) return !!loading || !symbol.trim();
+    return !!loading;
+  }
 
   // --- AUTH GATE: require login (after all hooks) ---
   if (status === "loading") {
@@ -77,110 +142,29 @@ export default function EarningsPage() {
     finally { clearLoad(); }
   }
 
-  async function handleEpsHistory() {
-    if (!symbol) return;
-    setLoad("eps");
+  async function togglePanel(key: EarningsPanelKey) {
+    const spec = EARNINGS_PANEL_FETCH[key];
+    if (openPanels[key]) {
+      closePanel(key);
+      return;
+    }
+    if (spec.needsCompareSymbols && !compareSymbols.trim()) return;
+    if (spec.needsSymbol && !symbol.trim()) return;
+    setLoad(key);
     try {
-      const result = await callMCPTool("get_eps_history", { symbol: symbol.toUpperCase(), quarters: 8 }, token);
-      setEpsHistory(result.data as Record<string, unknown>);
+      const ctx = {
+        symbolUpper: symbol.trim().toUpperCase(),
+        compareSymbols: compareSymbols.trim(),
+      };
+      const result = await callMCPTool(spec.tool, spec.buildBody(ctx), token);
+      setPanelData(key, result.data as Record<string, unknown>);
+      setOpenPanels((o: Partial<Record<EarningsPanelKey, boolean>>) => ({ ...o, [key]: true }));
     } catch (e) {
       const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "EPS History requires Premium tier." : "Failed to load EPS history.");
-    } finally { clearLoad(); }
-  }
-
-  async function handlePreEarnings() {
-    if (!symbol) return;
-    setLoad("pre");
-    try {
-      const result = await callMCPTool("get_pre_earnings_profile", { symbol: symbol.toUpperCase() }, token);
-      setPreProfile(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Pre-earnings profile requires Premium tier." : "Failed to load pre-earnings profile.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleExpectations() {
-    if (!symbol) return;
-    setLoad("expect");
-    try {
-      const result = await callMCPTool("get_analyst_expectations", { symbol: symbol.toUpperCase() }, token);
-      setExpectations(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Analyst expectations requires Premium tier." : "Failed to load expectations.");
-    } finally { clearLoad(); }
-  }
-
-  async function handlePostReaction() {
-    if (!symbol) return;
-    setLoad("reaction");
-    try {
-      const result = await callMCPTool("get_post_results_reaction", { symbol: symbol.toUpperCase() }, token);
-      setPostReaction(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Post-results reaction requires Premium tier." : "Failed to load post-results reaction.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleActualVsExpected() {
-    if (!symbol) return;
-    setLoad("avse");
-    try {
-      const result = await callMCPTool("compare_actual_vs_expected", { symbol: symbol.toUpperCase() }, token);
-      setActualVsExpected(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Beat/miss analysis requires Premium tier." : "Failed to compare actual vs expected.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleOptionChain() {
-    if (!symbol) return;
-    setLoad("options");
-    try {
-      const result = await callMCPTool("get_option_chain", { symbol: symbol.toUpperCase() }, token);
-      setOptionChain(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Option chain requires Premium tier." : "Failed to load option chain.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleVerdict() {
-    if (!symbol) return;
-    setLoad("verdict");
-    try {
-      const result = await callMCPTool("earnings_verdict", { symbol: symbol.toUpperCase() }, token);
-      setVerdict(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Earnings verdict requires Analyst tier." : "Failed to run earnings verdict.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleDashboard() {
-    setLoad("dashboard");
-    try {
-      const result = await callMCPTool("earnings_season_dashboard", {}, token);
-      setDashboard(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Season dashboard requires Analyst tier." : "Failed to load dashboard.");
-    } finally { clearLoad(); }
-  }
-
-  async function handleCompare() {
-    setLoad("compare");
-    try {
-      const result = await callMCPTool("compare_quarterly_performance", { symbols: compareSymbols }, token);
-      setComparison(result.data as Record<string, unknown>);
-    } catch (e) {
-      const msg = (e as Error).message;
-      setError(msg === "FORBIDDEN" ? "Quarterly comparison requires Analyst tier." : "Failed to compare.");
-    } finally { clearLoad(); }
+      setError(msg === MCP_CLIENT.Error.Forbidden ? spec.forbiddenMsg : spec.loadFailedMsg);
+    } finally {
+      clearLoad();
+    }
   }
 
   const isLoading = (key: string) => loading === key;
@@ -207,36 +191,45 @@ export default function EarningsPage() {
       {/* ================================================================= */}
       {/* SECTION 1: FREE — Earnings Calendar */}
       {/* ================================================================= */}
-      <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <h3 className="font-semibold flex items-center gap-2">
             <Calendar className="h-4 w-4 text-emerald-400" /> Upcoming Earnings
-            <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("free"))}>Free</span>
+            <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Free))}>Free</span>
             {calendarCount > 0 && <span className="text-xs text-muted-foreground">({calendarCount} results)</span>}
           </h3>
           <div className="flex items-center gap-2">
-            <div className="flex rounded-md border border-border overflow-hidden text-xs">
+            <div className="flex rounded-lg border border-border overflow-hidden text-xs">
               {(["india", "nifty50", "all"] as const).map((f) => (
                 <button
                   key={f}
                   onClick={() => { setCalendarFilter(f); if (calendar.length > 0) loadCalendar(f); }}
                   className={cn(
-                    "px-2.5 py-1 capitalize transition-colors",
-                    calendarFilter === f ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+                    "px-3 py-1.5 capitalize transition-all font-medium",
+                    calendarFilter === f
+                      ? "bg-emerald-500 text-white shadow-sm"
+                      : "hover:bg-secondary text-muted-foreground hover:text-foreground"
                   )}
                 >
                   {f === "nifty50" ? "Nifty 50" : f === "all" ? "All" : "India"}
                 </button>
               ))}
             </div>
-            <button onClick={() => loadCalendar()} disabled={!!loading} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50">
+            <button
+              onClick={() => loadCalendar()}
+              disabled={!!loading}
+              className="px-4 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-500 disabled:opacity-50 transition-colors shadow-sm"
+            >
               {isLoading("calendar") ? <Spin /> : "Load Calendar"}
             </button>
           </div>
         </div>
+
         {calendar.length > 0 ? (
-          <>
-            {/* Group entries by week_group */}
+          <div className="space-y-5">
+            <p className="text-[10px] text-muted-foreground">
+              Showing {calendar.length} entries &middot; Sources: BSE Board Meetings + Finnhub &middot; Filter: {calendarFilter === "nifty50" ? "Nifty 50" : calendarFilter === "all" ? "All (Global)" : "India"}
+            </p>
             {(() => {
               const groups: Record<string, Record<string, unknown>[]> = {};
               const order: string[] = [];
@@ -246,77 +239,138 @@ export default function EarningsPage() {
                 groups[g].push(e);
               }
               return order.map((group) => (
-                <div key={group} className="space-y-1.5">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mt-2">
-                    <Clock className="h-3 w-3" /> {group}
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {groups[group].map((e, i) => {
-                      const inPortfolio = e.in_portfolio as boolean;
-                      const isNifty = e.is_nifty50 as boolean;
-                      const dateTbd = e.date_tbd as boolean;
-                      const links = e.verify_links as Record<string, string> | null;
-                      return (
-                        <div
-                          key={i}
-                          className={cn(
-                            "p-3 rounded-lg text-sm border",
-                            inPortfolio ? "border-emerald-500/40 bg-emerald-500/10" : "border-transparent bg-secondary/50"
-                          )}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium flex items-center gap-1.5 truncate">
-                                {inPortfolio && <Star className="h-3 w-3 text-emerald-400 shrink-0" />}
-                                {(e.symbol as string) || "—"}
-                                {isNifty && <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/20 text-blue-300">N50</span>}
-                              </p>
-                              {(e.company_name as string) && (
-                                <p className="text-xs text-muted-foreground truncate">{e.company_name as string} &mdash; {(e.exchange as string) || "NSE"}</p>
+                <div key={group} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary/70 border border-border">
+                      <Clock className="h-3 w-3 text-emerald-400" />
+                      <span className="text-xs font-semibold uppercase tracking-wider text-foreground/80">{group}</span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">{groups[group].length} stocks</span>
+                    <div className="flex-1 h-px bg-border/50" />
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-muted-foreground border-b border-border/50">
+                          <th className="text-left py-2 px-3 font-medium">Symbol</th>
+                          <th className="text-left py-2 px-3 font-medium hidden md:table-cell">Company</th>
+                          <th className="text-left py-2 px-3 font-medium hidden lg:table-cell">Sector</th>
+                          <th className="text-center py-2 px-2 font-medium">Date</th>
+                          <th className="text-center py-2 px-2 font-medium">Quarter</th>
+                          <th className="text-right py-2 px-3 font-medium">Est. EPS</th>
+                          <th className="text-right py-2 px-2 font-medium w-16">Links</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groups[group].map((e, i) => {
+                          const inPortfolio = e.in_portfolio as boolean;
+                          const isNifty = e.is_nifty50 as boolean;
+                          const dateTbd = e.date_tbd as boolean;
+                          const links = e.verify_links as Record<string, string> | null;
+                          const daysAway = e.days_away as number | null;
+                          return (
+                            <tr
+                              key={i}
+                              className={cn(
+                                "border-b border-border/30 transition-colors hover:bg-secondary/30",
+                                inPortfolio && "bg-emerald-500/5"
                               )}
-                              {(e.sector as string) && (
-                                <p className="text-[10px] text-muted-foreground/70">{e.sector as string}</p>
-                              )}
-                            </div>
-                            {links && (
-                              <div className="flex gap-1 shrink-0">
-                                {(links.nse) && (
-                                  <a href={links.nse} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5">
-                                    NSE <ExternalLink className="h-2.5 w-2.5" />
-                                  </a>
+                            >
+                              <td className="py-2.5 px-3">
+                                <div className="flex items-center gap-1.5">
+                                  {inPortfolio && <Star className="h-3 w-3 text-emerald-400 shrink-0" />}
+                                  <span className="font-semibold text-foreground">{(e.symbol as string) || "—"}</span>
+                                  {isNifty && (
+                                    <span className="text-[9px] px-1 py-px rounded bg-blue-500/20 text-blue-300 font-medium leading-tight">N50</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 hidden md:table-cell">
+                                <span className="text-xs text-muted-foreground truncate block max-w-[200px]">
+                                  {(e.company_name as string) || "—"}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 hidden lg:table-cell">
+                                <span className="text-[11px] text-muted-foreground/70">{(e.sector as string) || "—"}</span>
+                              </td>
+                              <td className="py-2.5 px-2 text-center">
+                                {dateTbd ? (
+                                  <span className="inline-flex items-center gap-1 text-xs text-amber-400" title={e.tbd_reason as string}>
+                                    <HelpCircle className="h-3 w-3" /> TBD
+                                  </span>
+                                ) : (
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="text-xs">{e.expected_date as string}</span>
+                                    {daysAway != null && (
+                                      <span className={cn(
+                                        "text-[10px] font-medium px-1.5 py-px rounded-full",
+                                        daysAway <= 3
+                                          ? "bg-red-500/15 text-red-400"
+                                          : daysAway <= 7
+                                            ? "bg-amber-500/15 text-amber-400"
+                                            : "bg-emerald-500/15 text-emerald-400"
+                                      )}>
+                                        in {daysAway}d
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
-                                {(links.bse) && (
-                                  <a href={links.bse} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5">
-                                    BSE <ExternalLink className="h-2.5 w-2.5" />
-                                  </a>
+                              </td>
+                              <td className="py-2.5 px-2 text-center text-xs text-muted-foreground">
+                                {(e.quarter as number) != null ? `Q${e.quarter as number} ${e.year as number || ""}` : "—"}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono text-xs">
+                                {(e.eps_estimate as number) != null ? (e.eps_estimate as number).toFixed(2) : "—"}
+                              </td>
+                              <td className="py-2.5 px-2 text-right">
+                                {links && (
+                                  <div className="flex justify-end gap-1.5">
+                                    {links.nse && (
+                                      <a
+                                        href={links.nse}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[10px] text-blue-400 hover:text-blue-300 hover:underline"
+                                      >
+                                        NSE
+                                      </a>
+                                    )}
+                                    {links.bse && (
+                                      <a
+                                        href={links.bse}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[10px] text-blue-400 hover:text-blue-300 hover:underline"
+                                      >
+                                        BSE
+                                      </a>
+                                    )}
+                                  </div>
                                 )}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
-                            {dateTbd ? (
-                              <span className="flex items-center gap-1 text-amber-400" title={e.tbd_reason as string}>
-                                <HelpCircle className="h-3 w-3" /> TBD
-                              </span>
-                            ) : (
-                              <span>{e.expected_date as string}</span>
-                            )}
-                            {e.days_away != null && !dateTbd && (
-                              <span className="text-emerald-400">in {e.days_away as number}d</span>
-                            )}
-                            {(e.quarter as number) != null && <span>&middot; Q{e.quarter as number} {e.year as number || ""}</span>}
-                            {(e.eps_estimate as number) != null && <span>&middot; Est: {e.eps_estimate as number}</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               ));
             })()}
-          </>
+          </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Click &quot;Load Calendar&quot; to see upcoming Indian earnings dates.</p>
+          <div className="flex flex-col items-center justify-center py-8 space-y-2">
+            <Calendar className="h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">
+              {loading === "calendar" ? "Fetching earnings dates from BSE & Finnhub..." : "Click \"Load Calendar\" to see upcoming earnings dates"}
+            </p>
+            {!loading && calendarCount === 0 && error && (
+              <p className="text-xs text-amber-400 max-w-md text-center">
+                If the calendar returns empty, try switching to &quot;All&quot; filter. Indian earnings dates are sourced from BSE board meeting announcements.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -329,7 +383,7 @@ export default function EarningsPage() {
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             className="px-3 py-2 rounded-md bg-secondary border border-border text-sm w-36"
           />
-          <span className="text-xs text-muted-foreground">Select a tool:</span>
+          <span className="text-xs text-muted-foreground">Toggle a tool (click again to hide data):</span>
         </div>
       </div>
 
@@ -340,7 +394,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <TrendingUp className="h-5 w-5 text-amber-400" />
           <h2 className="text-lg font-semibold">Pre-Earnings Analysis</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium</span>
           {tierLevel < 1 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -350,22 +404,46 @@ export default function EarningsPage() {
           <>
             {/* Action buttons row */}
             <div className="flex flex-wrap gap-2">
-              <button onClick={handleEpsHistory} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("eps") ? <Spin /> : "EPS History"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.eps}
+                onClick={() => void togglePanel("eps")}
+                disabled={panelButtonDisabled("eps")}
+                className={panelBtn(!!openPanels.eps, earningsPanelIsPremium("eps"))}
+              >
+                {isLoading("eps") ? <Spin /> : EARNINGS_PANEL_FETCH.eps.label}
               </button>
-              <button onClick={handlePreEarnings} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("pre") ? <Spin /> : "Pre-Earnings Profile"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.pre}
+                onClick={() => void togglePanel("pre")}
+                disabled={panelButtonDisabled("pre")}
+                className={panelBtn(!!openPanels.pre, earningsPanelIsPremium("pre"))}
+              >
+                {isLoading("pre") ? <Spin /> : EARNINGS_PANEL_FETCH.pre.label}
               </button>
-              <button onClick={handleExpectations} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("expect") ? <Spin /> : "Analyst Expectations"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.expect}
+                onClick={() => void togglePanel("expect")}
+                disabled={panelButtonDisabled("expect")}
+                className={panelBtn(!!openPanels.expect, earningsPanelIsPremium("expect"))}
+              >
+                {isLoading("expect") ? <Spin /> : EARNINGS_PANEL_FETCH.expect.label}
               </button>
-              <button onClick={handleOptionChain} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("options") ? <Spin /> : "Option Chain"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.options}
+                onClick={() => void togglePanel("options")}
+                disabled={panelButtonDisabled("options")}
+                className={panelBtn(!!openPanels.options, earningsPanelIsPremium("options"))}
+              >
+                {isLoading("options") ? <Spin /> : EARNINGS_PANEL_FETCH.options.label}
               </button>
             </div>
 
             {/* EPS History */}
-            {epsHistory && (
+            {openPanels.eps && epsHistory && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><TrendingUp className="h-3 w-3" /> EPS History: {epsHistory.symbol as string}</h4>
                 <p className="text-xs text-muted-foreground">
@@ -395,7 +473,7 @@ export default function EarningsPage() {
             )}
 
             {/* Pre-Earnings Profile */}
-            {preProfile && (
+            {openPanels.pre && preProfile && (
               <div className="rounded-lg border border-border p-4 space-y-3">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><Target className="h-3 w-3" /> Pre-Earnings Profile: {preProfile.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
@@ -445,7 +523,7 @@ export default function EarningsPage() {
             )}
 
             {/* Analyst Expectations */}
-            {expectations && (
+            {openPanels.expect && expectations && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><Eye className="h-3 w-3" /> Analyst Expectations: {expectations.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -458,7 +536,7 @@ export default function EarningsPage() {
             )}
 
             {/* Option Chain */}
-            {optionChain && (
+            {openPanels.options && optionChain && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm flex items-center gap-1"><Activity className="h-3 w-3" /> Option Chain: {optionChain.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -480,7 +558,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <ArrowUpDown className="h-5 w-5 text-amber-400" />
           <h2 className="text-lg font-semibold">Post-Earnings Analysis</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("premium"))}>Premium</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Premium))}>Premium</span>
           {tierLevel < 1 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -489,16 +567,28 @@ export default function EarningsPage() {
         ) : (
           <>
             <div className="flex flex-wrap gap-2">
-              <button onClick={handlePostReaction} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("reaction") ? <Spin /> : "Post-Results Reaction"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.reaction}
+                onClick={() => void togglePanel("reaction")}
+                disabled={panelButtonDisabled("reaction")}
+                className={panelBtn(!!openPanels.reaction, earningsPanelIsPremium("reaction"))}
+              >
+                {isLoading("reaction") ? <Spin /> : EARNINGS_PANEL_FETCH.reaction.label}
               </button>
-              <button onClick={handleActualVsExpected} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-500 disabled:opacity-50">
-                {isLoading("avse") ? <Spin /> : "Beat / Miss Analysis"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.avse}
+                onClick={() => void togglePanel("avse")}
+                disabled={panelButtonDisabled("avse")}
+                className={panelBtn(!!openPanels.avse, earningsPanelIsPremium("avse"))}
+              >
+                {isLoading("avse") ? <Spin /> : EARNINGS_PANEL_FETCH.avse.label}
               </button>
             </div>
 
             {/* Post-Results Reaction */}
-            {postReaction && (
+            {openPanels.reaction && postReaction && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm">Post-Results Reaction: {postReaction.symbol as string}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -516,7 +606,7 @@ export default function EarningsPage() {
             )}
 
             {/* Actual vs Expected */}
-            {actualVsExpected && (
+            {openPanels.avse && actualVsExpected && (
               <div className="rounded-lg border border-border p-4 space-y-2">
                 <h4 className="font-semibold text-sm">Beat / Miss: {actualVsExpected.symbol as string}</h4>
                 <div className="flex items-center gap-3">
@@ -547,7 +637,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-purple-400" />
           <h2 className="text-lg font-semibold">Cross-Source Earnings Verdict</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst</span>
           {tierLevel < 2 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -556,43 +646,114 @@ export default function EarningsPage() {
         ) : (
           <>
             <div className="flex flex-wrap gap-2">
-              <button onClick={handleVerdict} disabled={!!loading || !symbol} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
-                {isLoading("verdict") ? <Spin /> : "Run Earnings Verdict"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.verdict}
+                onClick={() => void togglePanel("verdict")}
+                disabled={panelButtonDisabled("verdict")}
+                className={panelBtn(!!openPanels.verdict, earningsPanelIsPremium("verdict"))}
+              >
+                {isLoading("verdict") ? <Spin /> : EARNINGS_PANEL_FETCH.verdict.label}
               </button>
-              <button onClick={handleDashboard} disabled={!!loading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
-                {isLoading("dashboard") ? <Spin /> : "Season Dashboard"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.dashboard}
+                onClick={() => void togglePanel("dashboard")}
+                disabled={panelButtonDisabled("dashboard")}
+                className={panelBtn(!!openPanels.dashboard, earningsPanelIsPremium("dashboard"))}
+              >
+                {isLoading("dashboard") ? <Spin /> : EARNINGS_PANEL_FETCH.dashboard.label}
               </button>
             </div>
 
             {/* Verdict */}
-            {verdict && (
-              <div className="rounded-lg border border-border p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <h4 className="font-semibold">Verdict: {verdict.symbol as string}</h4>
-                  <div className={cn("px-3 py-1 rounded-full text-sm font-bold",
-                    verdict.beat_miss === "beat" ? "bg-emerald-500/20 text-emerald-300" :
-                    verdict.beat_miss === "miss" ? "bg-red-500/20 text-red-300" :
-                    "bg-muted text-muted-foreground"
-                  )}>
-                    {((verdict.beat_miss as string) || "inline").toUpperCase()} {verdict.surprise_pct != null ? `(${(verdict.surprise_pct as number) > 0 ? "+" : ""}${verdict.surprise_pct}%)` : ""}
+            {openPanels.verdict && verdict && (
+              <div className="rounded-lg border border-border p-4 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <h4 className="font-semibold text-base">Verdict: {verdict.symbol as string}</h4>
+                    <div className={cn("px-3 py-1 rounded-full text-sm font-bold",
+                      verdict.beat_miss === "beat" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" :
+                      verdict.beat_miss === "miss" ? "bg-red-500/20 text-red-300 border border-red-500/30" :
+                      "bg-muted text-muted-foreground border border-border"
+                    )}>
+                      {((verdict.beat_miss as string) || "inline").toUpperCase()} {verdict.surprise_pct != null && (verdict.surprise_pct as number) !== 0 ? `(${(verdict.surprise_pct as number) > 0 ? "+" : ""}${verdict.surprise_pct}%)` : ""}
+                    </div>
+                  </div>
+                  {(verdict.quarter as string) ? (
+                    <span className="text-xs text-muted-foreground">{verdict.quarter as string}</span>
+                  ) : null}
+                </div>
+
+                {/* Key metrics grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div className="p-2.5 rounded-lg bg-secondary/50 border border-border/50">
+                    <span className="text-muted-foreground">EPS</span>
+                    <p className="font-semibold font-mono text-sm mt-0.5">
+                      {(verdict.filing_highlights as Record<string, unknown>)?.eps != null
+                        ? `₹${(verdict.filing_highlights as Record<string, unknown>).eps}`
+                        : "N/A"}
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-secondary/50 border border-border/50">
+                    <span className="text-muted-foreground">Price Change</span>
+                    <p className={cn("font-semibold font-mono text-sm mt-0.5",
+                      ((verdict.market_reaction as Record<string, unknown>)?.price_change_pct as number) > 0 ? "text-emerald-400" :
+                      ((verdict.market_reaction as Record<string, unknown>)?.price_change_pct as number) < 0 ? "text-red-400" : ""
+                    )}>
+                      {(verdict.market_reaction as Record<string, unknown>)?.price_change_pct != null
+                        ? `${((verdict.market_reaction as Record<string, unknown>).price_change_pct as number) > 0 ? "+" : ""}${((verdict.market_reaction as Record<string, unknown>).price_change_pct as number).toFixed(1)}%`
+                        : "N/A"}
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-secondary/50 border border-border/50">
+                    <span className="text-muted-foreground">FII Signal</span>
+                    <p className={cn("font-semibold font-mono text-sm mt-0.5",
+                      ((verdict.shareholding_signal as Record<string, unknown>)?.fii_change_pp as number) > 0 ? "text-emerald-400" :
+                      ((verdict.shareholding_signal as Record<string, unknown>)?.fii_change_pp as number) < 0 ? "text-red-400" : ""
+                    )}>
+                      {(verdict.shareholding_signal as Record<string, unknown>)?.fii_change_pp != null
+                        ? `${((verdict.shareholding_signal as Record<string, unknown>).fii_change_pp as number) > 0 ? "+" : ""}${((verdict.shareholding_signal as Record<string, unknown>).fii_change_pp as number).toFixed(1)}pp`
+                        : "N/A"}
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-secondary/50 border border-border/50">
+                    <span className="text-muted-foreground">Sentiment</span>
+                    <p className={cn("font-semibold font-mono text-sm mt-0.5",
+                      (verdict.sentiment_score as number) > 0.1 ? "text-emerald-400" :
+                      (verdict.sentiment_score as number) < -0.1 ? "text-red-400" : ""
+                    )}>
+                      {verdict.sentiment_score != null
+                        ? `${(verdict.sentiment_score as number) > 0 ? "+" : ""}${(verdict.sentiment_score as number).toFixed(2)}`
+                        : "N/A"}
+                    </p>
                   </div>
                 </div>
-                <p className="text-sm leading-relaxed">{verdict.narrative as string}</p>
-                {/* Contradictions */}
+
+                <TrustScorePanel payload={verdict} />
+
+                <div className="rounded-lg bg-secondary/30 border border-border/50 p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1.5">Reasoning</p>
+                  <p className="text-sm leading-relaxed">{verdict.narrative as string}</p>
+                </div>
+
                 {((verdict.contradictions as string[]) || []).length > 0 && (
-                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-1">
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-1.5">
                     <p className="text-xs font-semibold text-amber-400 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Contradictions Detected</p>
                     {((verdict.contradictions as string[]) || []).map((c, i) => (
                       <p key={i} className="text-xs text-muted-foreground">&bull; {c}</p>
                     ))}
                   </div>
                 )}
-                {/* Citations */}
+
                 {((verdict.citations as Record<string, unknown>[]) || []).length > 0 && (
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <p className="font-medium">Sources &amp; Citations:</p>
+                  <div className="text-xs text-muted-foreground space-y-1 border-t border-border/50 pt-3">
+                    <p className="font-medium text-foreground/70">Sources &amp; Citations:</p>
                     {((verdict.citations as Record<string, unknown>[]) || []).map((c, i) => (
-                      <p key={i}>&bull; [{c.source as string}] {c.data_point as string}</p>
+                      <p key={i} className="flex items-start gap-1">
+                        <span className="text-purple-400 shrink-0">&bull;</span>
+                        <span>[{c.source as string}] {c.data_point as string}</span>
+                      </p>
                     ))}
                   </div>
                 )}
@@ -600,23 +761,77 @@ export default function EarningsPage() {
             )}
 
             {/* Season Dashboard */}
-            {dashboard && (
-              <div className="rounded-lg border border-border p-4 space-y-3">
-                <h4 className="font-semibold text-sm flex items-center gap-1"><BarChart3 className="h-3 w-3" /> Earnings Season Dashboard</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                  <div className="p-3 rounded bg-emerald-500/10 text-center"><p className="text-2xl font-bold text-emerald-400">{dashboard.beats as number}</p><p className="text-xs text-muted-foreground">Beats</p></div>
-                  <div className="p-3 rounded bg-red-500/10 text-center"><p className="text-2xl font-bold text-red-400">{dashboard.misses as number}</p><p className="text-xs text-muted-foreground">Misses</p></div>
-                  <div className="p-3 rounded bg-secondary/50 text-center"><p className="text-2xl font-bold">{dashboard.inlines as number}</p><p className="text-xs text-muted-foreground">Inline</p></div>
-                  <div className="p-3 rounded bg-secondary/50 text-center"><p className="text-2xl font-bold">{dashboard.companies_analysed as number}</p><p className="text-xs text-muted-foreground">Analysed</p></div>
+            {openPanels.dashboard && dashboard && (
+              <div className="rounded-lg border border-border p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-sm flex items-center gap-1.5">
+                    <BarChart3 className="h-4 w-4 text-purple-400" /> Earnings Season Dashboard
+                  </h4>
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span>{dashboard.calendar_entries as number} calendar entries</span>
+                    <span>&middot;</span>
+                    <span>Week of {dashboard.week_date as string}</span>
+                  </div>
                 </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
+                    <p className="text-3xl font-bold text-emerald-400">{dashboard.beats as number}</p>
+                    <p className="text-xs text-emerald-300/70 font-medium mt-1">Beats</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-center">
+                    <p className="text-3xl font-bold text-red-400">{dashboard.misses as number}</p>
+                    <p className="text-xs text-red-300/70 font-medium mt-1">Misses</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-secondary/50 border border-border text-center">
+                    <p className="text-3xl font-bold">{dashboard.inlines as number}</p>
+                    <p className="text-xs text-muted-foreground font-medium mt-1">Inline</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-secondary/50 border border-border text-center">
+                    <p className="text-3xl font-bold">{dashboard.companies_analysed as number}</p>
+                    <p className="text-xs text-muted-foreground font-medium mt-1">Analysed</p>
+                  </div>
+                </div>
+
+                {/* Sector Trends */}
+                {(dashboard.sector_trends as Record<string, unknown> | null) && Object.keys(dashboard.sector_trends as Record<string, unknown>).length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-foreground/70">Sector Trends</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {Object.entries(dashboard.sector_trends as Record<string, Record<string, number>>).map(([sector, counts]) => (
+                        <div key={sector} className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border/50 text-xs">
+                          <span className="font-medium truncate">{sector}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {counts.beats > 0 && <span className="text-emerald-400">{counts.beats}B</span>}
+                            {counts.misses > 0 && <span className="text-red-400">{counts.misses}M</span>}
+                            {counts.inlines > 0 && <span className="text-muted-foreground">{counts.inlines}I</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {((dashboard.notable_surprises as Record<string, unknown>[]) || []).length > 0 && (
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold">Notable Surprises:</p>
-                    {((dashboard.notable_surprises as Record<string, unknown>[]) || []).map((s, i) => (
-                      <p key={i} className={cn("text-xs", s.type === "positive_surprise" ? "text-emerald-400" : "text-red-400")}>
-                        &bull; {s.symbol as string}: {s.type === "positive_surprise" ? "+" : ""}{(s.yoy_growth_pct as number)?.toFixed(1)}% YoY growth
-                      </p>
-                    ))}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-foreground/70">Notable Surprises</p>
+                    <div className="space-y-1">
+                      {((dashboard.notable_surprises as Record<string, unknown>[]) || []).map((s, i) => (
+                        <div key={i} className={cn(
+                          "flex items-center justify-between p-2 rounded text-xs border",
+                          s.type === "positive_surprise"
+                            ? "bg-emerald-500/5 border-emerald-500/20"
+                            : "bg-red-500/5 border-red-500/20"
+                        )}>
+                          <span className="font-semibold">{s.symbol as string}</span>
+                          <span className={cn("font-mono font-medium",
+                            s.type === "positive_surprise" ? "text-emerald-400" : "text-red-400"
+                          )}>
+                            {s.type === "positive_surprise" ? "+" : ""}{(s.yoy_growth_pct as number)?.toFixed(1)}% YoY
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -632,7 +847,7 @@ export default function EarningsPage() {
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-purple-400" />
           <h2 className="text-lg font-semibold">Quarterly Performance Comparison</h2>
-          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge("analyst"))}>Analyst</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs border", tierBadge(TIER.Analyst))}>Analyst</span>
           {tierLevel < 2 && <Lock className="h-4 w-4 text-muted-foreground" />}
         </div>
 
@@ -642,11 +857,17 @@ export default function EarningsPage() {
           <>
             <div className="flex gap-2">
               <input value={compareSymbols} onChange={(e) => setCompareSymbols(e.target.value.toUpperCase())} placeholder="TCS,INFY,WIPRO" className="px-3 py-2 rounded-md bg-secondary border border-border text-sm flex-1" />
-              <button onClick={handleCompare} disabled={!!loading} className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-500 disabled:opacity-50">
-                {isLoading("compare") ? <Spin /> : "Compare"}
+              <button
+                type="button"
+                aria-pressed={!!openPanels.compare}
+                onClick={() => void togglePanel("compare")}
+                disabled={panelButtonDisabled("compare")}
+                className={panelBtn(!!openPanels.compare, earningsPanelIsPremium("compare"))}
+              >
+                {isLoading("compare") ? <Spin /> : EARNINGS_PANEL_FETCH.compare.label}
               </button>
             </div>
-            {comparison && (
+            {openPanels.compare && comparison && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-secondary/50">

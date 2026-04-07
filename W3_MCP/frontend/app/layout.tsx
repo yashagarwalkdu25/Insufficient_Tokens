@@ -7,6 +7,9 @@ export const metadata: Metadata = {
   title: "FinInt — Indian Financial Intelligence",
   description:
     "MCP-powered financial research, portfolio monitoring, and earnings analysis for Indian markets.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({

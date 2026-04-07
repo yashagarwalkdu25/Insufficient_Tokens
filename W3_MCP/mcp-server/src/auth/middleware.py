@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeAlias
 
 import structlog
 
@@ -21,14 +21,17 @@ from ..config.constants import (
     SCOPE_WATCHLIST_READ,
     SCOPE_WATCHLIST_WRITE,
     SCOPE_PORTFOLIO_READ,
+    SCOPE_PORTFOLIO_WRITE,
 )
 
 logger = structlog.get_logger(__name__)
 
+ToolScopeSpec: TypeAlias = str | tuple[str, ...]
+
 # ---------------------------------------------------------------------------
-# Tool -> required scope mapping (every tool in the spec)
+# Tool -> required scope(s): tuple = ALL must be present (PDF MF comparison = Premium+)
 # ---------------------------------------------------------------------------
-TOOL_SCOPE_MAP: dict[str, str] = {
+TOOL_SCOPE_MAP: dict[str, ToolScopeSpec] = {
     # -- Free-tier tools ---------------------------------------------------
     "get_stock_quote": SCOPE_MARKET_READ,
     "get_price_history": SCOPE_MARKET_READ,
@@ -55,7 +58,7 @@ TOOL_SCOPE_MAP: dict[str, str] = {
     "get_news_sentiment": SCOPE_NEWS_READ,
     "get_rbi_rates": SCOPE_MACRO_READ,
     "get_inflation_data": SCOPE_MACRO_HISTORICAL,
-    "compare_funds": SCOPE_FUNDAMENTALS_READ,
+    "compare_funds": (SCOPE_MF_READ, SCOPE_FUNDAMENTALS_READ),
     "get_corporate_filings": SCOPE_FILINGS_READ,
     "check_mf_overlap": SCOPE_PORTFOLIO_READ,
     "check_macro_sensitivity": SCOPE_PORTFOLIO_READ,
@@ -77,12 +80,43 @@ TOOL_SCOPE_MAP: dict[str, str] = {
     "earnings_verdict": SCOPE_RESEARCH_GENERATE,
     "earnings_season_dashboard": SCOPE_RESEARCH_GENERATE,
     "compare_quarterly_performance": SCOPE_RESEARCH_GENERATE,
+    # -- Alert & Notification tools ----------------------------------------
+    "create_price_alert": SCOPE_WATCHLIST_WRITE,
+    "create_portfolio_risk_alert": SCOPE_PORTFOLIO_READ,
+    "create_sentiment_alert": SCOPE_PORTFOLIO_READ,
+    "create_earnings_reminder": SCOPE_WATCHLIST_WRITE,
+    "get_my_alerts": SCOPE_WATCHLIST_READ,
+    "delete_alert": SCOPE_WATCHLIST_WRITE,
+    "get_notifications": SCOPE_WATCHLIST_READ,
+    "mark_notifications_read": SCOPE_WATCHLIST_WRITE,
+    "check_and_trigger_alerts": SCOPE_PORTFOLIO_READ,
+    # -- Morning brief & advanced tools ------------------------------------
+    "generate_morning_brief": SCOPE_PORTFOLIO_READ,
+    # -- Resource subscription tools ---------------------------------------
+    "subscribe_resource": SCOPE_WATCHLIST_WRITE,
+    "unsubscribe_resource": SCOPE_WATCHLIST_WRITE,
+    "get_subscribed_updates": SCOPE_WATCHLIST_READ,
 }
 
 
 def check_scope(required_scope: str, user_claims: TokenClaims) -> bool:
     """Return True if the user's claims include the required scope."""
     return required_scope in user_claims.scopes
+
+
+def tool_scope_specs(tool_name: str) -> tuple[str, ...]:
+    """Normalise TOOL_SCOPE_MAP entry to a tuple of required scopes."""
+    spec = TOOL_SCOPE_MAP.get(tool_name)
+    if spec is None:
+        return ()
+    if isinstance(spec, str):
+        return (spec,)
+    return tuple(spec)
+
+
+def user_has_tool_scopes(tool_name: str, user_claims: TokenClaims) -> bool:
+    """True if the user holds every scope required for the tool."""
+    return all(s in user_claims.scopes for s in tool_scope_specs(tool_name))
 
 
 async def get_user_tier(token: str) -> str:
@@ -108,25 +142,24 @@ class TierToolFilter:
         allowed: list[dict[str, Any]] = []
         for tool in tools:
             tool_name: str = tool.get("name", "")
-            required_scope = TOOL_SCOPE_MAP.get(tool_name)
-            if required_scope is None:
+            reqs = tool_scope_specs(tool_name)
+            if not reqs:
                 logger.warning("tool_scope_unmapped", tool=tool_name)
                 continue
-            if check_scope(required_scope, user_claims):
+            if user_has_tool_scopes(tool_name, user_claims):
                 allowed.append(tool)
             else:
                 logger.debug(
                     "tool_filtered",
                     tool=tool_name,
-                    required=required_scope,
+                    required=reqs,
                     tier=user_claims.tier,
                 )
         return allowed
 
     def is_tool_allowed(self, tool_name: str, user_claims: TokenClaims) -> bool:
         """Check whether a single tool invocation is permitted."""
-        required_scope = TOOL_SCOPE_MAP.get(tool_name)
-        if required_scope is None:
+        if not tool_scope_specs(tool_name):
             logger.warning("tool_scope_unmapped", tool=tool_name)
             return False
-        return check_scope(required_scope, user_claims)
+        return user_has_tool_scopes(tool_name, user_claims)

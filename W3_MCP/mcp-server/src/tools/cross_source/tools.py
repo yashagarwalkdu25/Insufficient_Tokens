@@ -8,8 +8,21 @@ from typing import Any
 from ...server import mcp
 from ...data_facade.facade import data_facade
 from ...crews.research_crew import run_research_crew
+from ...cross_source import compute_trust_envelope
 
 logger = structlog.get_logger(__name__)
+
+
+def _attach_trust_research(data: dict[str, Any]) -> None:
+    ctr = data.get("contradictions")
+    extra = list(ctr) if isinstance(ctr, list) else None
+    data.update(
+        compute_trust_envelope(
+            data.get("signals"),
+            context="research",
+            extra_contradiction_strings=extra,
+        )
+    )
 
 
 @mcp.tool()
@@ -48,6 +61,7 @@ async def cross_reference_signals(symbol: str) -> dict[str, Any]:
         crew_result = await run_research_crew(symbol)
         if "error" not in crew_result:
             logger.info("cross_reference.crewai_success", symbol=symbol)
+            _attach_trust_research(crew_result)
             return {
                 "data": crew_result,
                 "source": "crewai_research_crew",
@@ -128,24 +142,27 @@ async def cross_reference_signals(symbol: str) -> dict[str, Any]:
 
     avg_confidence = round(sum(s["confidence"] for s in signals) / len(signals), 3)
 
+    data_heuristic: dict[str, Any] = {
+        "symbol": symbol,
+        "signals": signals,
+        "contradictions": contradictions,
+        "synthesis": (
+            f"Cross-source analysis for {symbol}: {len(signals)} signals from "
+            f"{len(set(s['source'] for s in signals))} sources. "
+            f"{'Contradictions detected.' if contradictions else 'Signals broadly aligned.'} "
+            f"(heuristic fallback — CrewAI unavailable)"
+        ),
+        "overall_confidence": avg_confidence,
+        "citations": [
+            {"source": s["source"], "data_point": s["evidence"], "value": str(s["direction"]),
+             "timestamp": s["timestamp"]}
+            for s in signals
+        ],
+    }
+    _attach_trust_research(data_heuristic)
+
     return {
-        "data": {
-            "symbol": symbol,
-            "signals": signals,
-            "contradictions": contradictions,
-            "synthesis": (
-                f"Cross-source analysis for {symbol}: {len(signals)} signals from "
-                f"{len(set(s['source'] for s in signals))} sources. "
-                f"{'Contradictions detected.' if contradictions else 'Signals broadly aligned.'} "
-                f"(heuristic fallback — CrewAI unavailable)"
-            ),
-            "overall_confidence": avg_confidence,
-            "citations": [
-                {"source": s["source"], "data_point": s["evidence"], "value": str(s["direction"]),
-                 "timestamp": s["timestamp"]}
-                for s in signals
-            ],
-        },
+        "data": data_heuristic,
         "source": "cross_source_heuristic",
         "cache_status": "miss",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -173,18 +190,20 @@ async def generate_research_brief(symbol: str) -> dict[str, Any]:
         if "error" not in crew_result:
             shareholding = await data_facade.get_shareholding(symbol, quarters=2)
             logger.info("research_brief.crewai_success", symbol=symbol)
+            brief_data: dict[str, Any] = {
+                "symbol": symbol,
+                "title": f"Research Brief: {symbol}",
+                "signals": crew_result.get("signals", []),
+                "contradictions": crew_result.get("contradictions", []),
+                "shareholding_snapshot": shareholding.get("data", {}),
+                "synthesis": crew_result.get("synthesis", ""),
+                "overall_confidence": crew_result.get("overall_confidence", 0.5),
+                "citations": crew_result.get("citations", []),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _attach_trust_research(brief_data)
             return {
-                "data": {
-                    "symbol": symbol,
-                    "title": f"Research Brief: {symbol}",
-                    "signals": crew_result.get("signals", []),
-                    "contradictions": crew_result.get("contradictions", []),
-                    "shareholding_snapshot": shareholding.get("data", {}),
-                    "synthesis": crew_result.get("synthesis", ""),
-                    "overall_confidence": crew_result.get("overall_confidence", 0.5),
-                    "citations": crew_result.get("citations", []),
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                },
+                "data": brief_data,
                 "source": "crewai_research_crew",
                 "cache_status": "miss",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -204,19 +223,21 @@ async def generate_research_brief(symbol: str) -> dict[str, Any]:
     shareholding = await data_facade.get_shareholding(symbol, quarters=2)
 
     data = signals_result["data"]
+    brief_fb: dict[str, Any] = {
+        "symbol": symbol,
+        "title": f"Research Brief: {symbol}",
+        "signals": data["signals"],
+        "contradictions": data["contradictions"],
+        "shareholding_snapshot": shareholding.get("data", {}),
+        "synthesis": data["synthesis"],
+        "overall_confidence": data["overall_confidence"],
+        "citations": data["citations"],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _attach_trust_research(brief_fb)
 
     return {
-        "data": {
-            "symbol": symbol,
-            "title": f"Research Brief: {symbol}",
-            "signals": data["signals"],
-            "contradictions": data["contradictions"],
-            "shareholding_snapshot": shareholding.get("data", {}),
-            "synthesis": data["synthesis"],
-            "overall_confidence": data["overall_confidence"],
-            "citations": data["citations"],
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        },
+        "data": brief_fb,
         "source": "cross_source_heuristic",
         "cache_status": "miss",
         "timestamp": datetime.now(timezone.utc).isoformat(),
