@@ -18,7 +18,7 @@ Three product tracks are implemented end-to-end:
 
 | Document | Audience | Contents |
 |----------|----------|----------|
-| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Everyone | Deep-dive: layers, E2E lifecycle, CrewAI (agents/tasks/crew/tools/memory/planning), tools design, communication & API flow, LLM strategy, **QA playbook**, observability, **gap analysis**, appendices |
+| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Everyone | Deep-dive: layers, E2E lifecycle, CrewAI (agents/tasks/crew/tools/memory/planning), tools design, communication & API flow, LLM strategy, **QA playbook**, observability, appendices |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | DevOps / SRE | Docker, EC2, ports, build args, public URLs |
 | [docs/MCP.md](docs/MCP.md) | Client integrators | `/mcp`, REST bridge, IDE setup, curl examples |
 | [docs/data-sources-guide.md](docs/data-sources-guide.md) | Data / backend | External APIs, keys, fallbacks |
@@ -26,9 +26,9 @@ Three product tracks are implemented end-to-end:
 ### Reading guide by role
 
 - **New developer:** Start with [System architecture (deep dive)](docs/ARCHITECTURE.md#1-system-architecture-deep-dive) and [Tools architecture](docs/ARCHITECTURE.md#3-tools-architecture), then skim `mcp-server/src/server.py` and `data_facade/facade.py`.
-- **QA engineer:** Use [Testing & validation](docs/ARCHITECTURE.md#7-testing--validation-qa-perspective), [Sample execution report](docs/ARCHITECTURE.md#sample-execution-report), and [Architecture gap analysis](docs/ARCHITECTURE.md#architecture-gap-analysis).
+- **QA engineer:** Use [Testing & validation](docs/ARCHITECTURE.md#7-testing--validation-qa-perspective) and [Sample execution report](docs/ARCHITECTURE.md#sample-execution-report).
 - **AI/ML engineer:** Read [CrewAI concepts](docs/ARCHITECTURE.md#2-crewai-concepts-detailed-explanation) and [LLM & prompt engineering](docs/ARCHITECTURE.md#6-llm--prompt-engineering); inspect `mcp-server/src/crews/*.py` and `tracing.py`.
-- **System architect:** Focus on [Communication flow](docs/ARCHITECTURE.md#4-communication-flow), [API & data flow](docs/ARCHITECTURE.md#5-api--data-flow), persistence, and gap table.
+- **System architect:** Focus on [Communication flow](docs/ARCHITECTURE.md#4-communication-flow), [API & data flow](docs/ARCHITECTURE.md#5-api--data-flow), persistence, and [Requirements traceability](docs/ARCHITECTURE.md#requirements-traceability).
 
 **Deliverables** requested for this documentation pass are consolidated as follows:
 
@@ -37,7 +37,6 @@ Three product tracks are implemented end-to-end:
 | Enhanced architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (full rewrite / expansion) |
 | Enhanced README | This file |
 | QA report & strategy | [§7 Testing & validation](docs/ARCHITECTURE.md#7-testing--validation-qa-perspective) |
-| Architecture gap analysis | [Architecture gap analysis](docs/ARCHITECTURE.md#architecture-gap-analysis) |
 | Execution flow documentation | [§1.3 E2E lifecycle](docs/ARCHITECTURE.md#13-end-to-end-request-lifecycle-dashboard--tool--data), [§4 Communication flow](docs/ARCHITECTURE.md#4-communication-flow), [Appendix A](docs/ARCHITECTURE.md#appendix-a--rest-tool-call-sequence-detailed) |
 
 ---
@@ -100,7 +99,7 @@ curl -s http://localhost:10004/health
 
 Ports on the host: **10001** Postgres, **10002** Redis, **10003** Keycloak, **10004** MCP, **10005** frontend.
 
-**JWT issuer:** Tokens must have `iss` equal to your configured **public** Keycloak issuer (`KEYCLOAK_PUBLIC_URL/realms/finint`). If you obtain tokens against an internal Docker hostname while the server validates the public issuer, validation fails — use the same issuer the MCP server expects ([gap G5](docs/ARCHITECTURE.md#architecture-gap-analysis)).
+**JWT issuer:** Tokens must have `iss` equal to your configured **public** Keycloak issuer (`KEYCLOAK_PUBLIC_URL/realms/finint`). If you obtain tokens against an internal Docker hostname while the server validates the public issuer, validation fails — use the same issuer the MCP server expects ([§1.4 Auth & enforcement](docs/ARCHITECTURE.md#14-auth--enforcement)).
 
 ---
 
@@ -149,7 +148,7 @@ docker compose logs -f mcp-server
 docker compose exec redis redis-cli FLUSHDB  # clear L2 cache / rate windows
 ```
 
-**Architecture, CrewAI, tools, QA, and gaps:** **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.  
+**Architecture, CrewAI, tools, and QA:** **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.  
 **MCP / REST client setup:** **[docs/MCP.md](docs/MCP.md)**.
 
 ---
@@ -158,8 +157,8 @@ docker compose exec redis redis-cli FLUSHDB  # clear L2 cache / rate windows
 
 - Upstream API keys live **only** on the server; the browser uses **short-lived JWTs**.
 - CORS is permissive in demo mode; tighten for production ([DEPLOYMENT.md](docs/DEPLOYMENT.md)).
-- Review [Architecture gap analysis](docs/ARCHITECTURE.md#architecture-gap-analysis) for REST resource scope hardening and validation error handling.
+- REST resource bridge and validation behaviour are described under [Auth & enforcement](docs/ARCHITECTURE.md#14-auth--enforcement) and [API & data flow](docs/ARCHITECTURE.md#5-api--data-flow).
 
 ---
 
-*README aligned with ARCHITECTURE.md v2.0 — FinInt / W3 MCP.*
+*README aligned with ARCHITECTURE.md v2.1 — FinInt / W3 MCP.*

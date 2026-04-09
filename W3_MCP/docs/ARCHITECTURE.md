@@ -7,7 +7,7 @@
 | New developers | [System architecture (deep dive)](#1-system-architecture-deep-dive) → [Tools architecture](#3-tools-architecture) → [Repo layout](#repo-layout) |
 | QA engineers | [Testing & validation (QA perspective)](#7-testing--validation-qa-perspective) → [Sample execution report](#sample-execution-report) |
 | AI/ML engineers | [CrewAI concepts](#2-crewai-concepts-detailed-explanation) → [LLM & prompt engineering](#6-llm--prompt-engineering) → [Observability](#8-observability--reporting) |
-| System architects | [Communication flow](#4-communication-flow) → [API & data flow](#5-api--data-flow) → [Architecture gap analysis](#architecture-gap-analysis) |
+| System architects | [Communication flow](#4-communication-flow) → [API & data flow](#5-api--data-flow) → [Requirements traceability](#requirements-traceability) |
 
 | Related doc | Role |
 |-------------|------|
@@ -29,9 +29,8 @@
 8. [Observability & reporting](#8-observability--reporting)  
 9. [Cross-source trust score (product feature)](#9-cross-source-trust-score-product-feature)  
 10. [Persistence](#persistence)  
-11. [Architecture gap analysis](#architecture-gap-analysis)  
-12. [Requirements traceability](#requirements-traceability)  
-13. [Appendices](#appendices)
+11. [Requirements traceability](#requirements-traceability)  
+12. [Appendices](#appendices)
 
 ---
 
@@ -113,7 +112,7 @@ flowchart TB
 ### 1.4 Auth & enforcement
 
 - **Flow:** User → Keycloak (NextAuth + **PKCE**) → JWT on `Authorization: Bearer` for MCP REST and `POST /mcp`.
-- **JWT (`auth/provider.py`):** JWKS (cached), RS256, issuer, audience, `exp`. **`iss` must match** `settings.keycloak_issuer` (public URL) — see [G5](#architecture-gap-analysis).
+- **JWT (`auth/provider.py`):** JWKS (cached), RS256, issuer, audience, `exp`. **`iss` must match** `settings.keycloak_issuer` (public URL); tokens minted against an internal hostname while the server expects the public issuer will fail validation.
 - **Scopes:** From **`realm_access.roles` → highest tier → `TIER_SCOPES[tier]`** in `config/constants.py` (not the JWT `scope` string as primary).
 - **Gating:** `TOOL_SCOPE_MAP` (`auth/middleware.py`) maps each tool → one required scope **or** a tuple of scopes (**all** must be present, e.g. `compare_funds` → `mf:read` + `fundamentals:read`). REST bridge uses `TierToolFilter.is_tool_allowed()` / `tool_scope_specs()`. Native **`POST /mcp`** uses **`KeycloakMCPVerifier`** and **`AuthMiddleware(auth=finint_component_auth)`** (`mcp_keycloak.py`), which filters **tools, prompts, and resources** by scope.
 
@@ -125,7 +124,7 @@ flowchart TB
 | `GET /api/resource?uri=` | ✓ | Not `TOOL_SCOPE_MAP` (bridge does not re-check URI scopes) | — | — |
 | `POST /mcp` | ✓ (`KeycloakMCPVerifier`) | ✓ (`AuthMiddleware` + `finint_component_auth`) | — | — |
 
-**Note:** REST resource bridge still authenticates JWT only; **tier-aware resource access** is enforced on the native MCP path. Prefer **`GET /api/resource`** from the dashboard only for trusted UI paths, or extend the bridge with URI→scope checks (see [G1](#architecture-gap-analysis)).
+**Note:** REST resource bridge still authenticates JWT only; **tier-aware resource access** is enforced on the native MCP path. Prefer **`GET /api/resource`** from the dashboard only for trusted UI paths, or extend the bridge with explicit URI→scope checks comparable to native MCP resources.
 
 **Implication:** Dashboard REST and native MCP both require a **valid Bearer JWT**; **`tools/list`**, **prompts**, and **resources** on `/mcp` reflect the caller’s tier scopes (capability negotiation for clients).
 
@@ -410,7 +409,7 @@ Configured in `config/settings.py` (env-overridable):
 | Area | Cases |
 |------|--------|
 | Auth | Invalid token → 401; wrong tier → 403 |
-| Input | Empty symbol, bogus symbol, SQL-like strings (should reject or safe error); **missing body fields** → should be **400** (current gap: may 500) |
+| Input | Empty symbol, bogus symbol, SQL-like strings (should reject or safe error); **missing body fields** → should be **400** (verify bridge maps validation failures to 4xx) |
 | Upstream | All adapters fail → facade returns error or stale cache |
 | Time | Weekend/holiday → empty news/calendar; document as **data availability** not necessarily **bugs** |
 
@@ -481,32 +480,17 @@ Deterministic post-processing in `cross_source/` — **not** LLM-scored. Normali
 
 ---
 
-## Architecture gap analysis
-
-| ID | Gap | Severity | Recommendation |
-|----|-----|----------|----------------|
-| G1 | REST `/api/resource` JWT-only; no per-URI scope matrix like native `/mcp` | Medium | Map resource URI → required scope in bridge |
-| G2 | `get_price_history` does not return true historical bars from dedicated history API | Medium | Wire `yfinance.history` (or Angel historical) in facade |
-| G3 | MCP resource **subscriptions** (push) not fully productised | Low | Implement notify/stream or document polling-only |
-| G4 | Pagination inconsistent across tools | Low | Standardise `page` / `page_size` / `total` |
-| G5 | Keycloak token `iss` must match `KEYCLOAK_PUBLIC_URL` — internal-only token fetch breaks validation | High (ops) | Document; use public issuer URL for all client tokens |
-| G6 | Missing tool args → 500 on REST | Medium | Catch validation errors → 400 + message |
-| G7 | Symbol regex allows some special characters before normalisation | Low | Stricter allowlist before processing |
-| G8 | `data.gov.in` adapter | Low | Optional government data source |
-
----
-
 ## Requirements traceability
 
-(See original checklist — still valid; gaps above extend it.)
+(See original checklist — still valid.)
 
 | Topic | Status | Note |
 |-------|--------|------|
 | OAuth 2.1 + PKCE, JWT, tiers, rate limits | Met | |
 | ≥4 external APIs / facade | Met | 8+ adapters |
 | CrewAI + trust envelope | Met | Analyst paths |
-| Resource subscriptions | Gap | G3 |
-| Uniform pagination | Partial | G4 |
+| Resource subscriptions | Partial | Push subscriptions not fully productised; polling supported |
+| Uniform pagination | Partial | Some tools differ on `page` / `page_size` / totals |
 
 ---
 
@@ -575,8 +559,8 @@ W3_MCP/
 
 ## Summary
 
-**FinInt** is a **tiered, OAuth-secured MCP server** with a **DataFacade** for resilient multi-source market data, **CrewAI** for structured analyst narratives, and a **deterministic trust layer** for cross-source confidence. The **Next.js** app uses the **REST tool bridge** for all privileged calls. Production hardening should focus on **token issuer consistency**, **validation error mapping to 400**, **true historical price API**, and **optional resource scope checks** on the REST resource bridge.
+**FinInt** is a **tiered, OAuth-secured MCP server** with a **DataFacade** for resilient multi-source market data, **CrewAI** for structured analyst narratives, and a **deterministic trust layer** for cross-source confidence. The **Next.js** app uses the **REST tool bridge** for all privileged calls.
 
 ---
 
-*Document version: 2.0 — expanded for developers, QA, ML, and architects.*
+*Document version: 2.1 — expanded for developers, QA, ML, and architects.*
