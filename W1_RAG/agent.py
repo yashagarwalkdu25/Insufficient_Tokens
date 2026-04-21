@@ -272,6 +272,9 @@ Output ONLY valid JSON:
         # Only bump access counts for relevant results
         for h in reranked:
             self.vs.increment_access(h["id"])
+            self.vs.update_relevance_stats(
+                h["id"], h.get("rerank_score", h.get("score", 0.0))
+            )
         return [
             Evidence(text=h["text"], source=h["source"],
                      score=h.get("rerank_score", h.get("score", 0)), origin="kb")

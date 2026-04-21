@@ -8,8 +8,8 @@ from config import MAX_SEARCH_RESULTS, TRUSTED_DOMAINS, TAVILY_API_KEY
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 1
-_RETRY_DELAYS = [2]  # minimal retry since Tavily fallback is fast
+_MAX_RETRIES = 3
+_RETRY_DELAYS = [2, 5, 10]  # exponential backoff before falling back to Tavily
 
 
 def _extract_domain(url: str) -> str:
@@ -72,20 +72,26 @@ def _ddg_search(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict]
     """Search using DuckDuckGo with retries. Returns [] on failure."""
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            ddgs = DDGS()
-            raw = ddgs.text(query, max_results=max_results)
-            results = []
-            for r in raw:
-                results.append({
+            with DDGS(timeout=10) as ddgs:
+                raw = ddgs.text(
+                    query,
+                    max_results=max_results,
+                    safesearch="moderate",
+                )
+            results = [
+                {
                     "title": r.get("title", ""),
                     "snippet": r.get("body", ""),
                     "url": r.get("href", ""),
-                })
+                }
+                for r in raw
+            ]
             logger.info("DDG search returned %d results for '%s'",
                         len(results), query[:60])
             return results
         except Exception as e:
-            if "Ratelimit" in str(e) and attempt < _MAX_RETRIES:
+            is_ratelimit = "Ratelimit" in type(e).__name__ or "Ratelimit" in str(e)
+            if is_ratelimit and attempt < _MAX_RETRIES:
                 delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
                 logger.warning("DDG rate-limited, retrying in %ds (attempt %d/%d)…",
                                delay, attempt + 1, _MAX_RETRIES)

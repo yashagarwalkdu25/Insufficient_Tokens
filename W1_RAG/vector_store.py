@@ -179,6 +179,22 @@ class VectorStore:
         except Exception:
             pass
 
+    def update_relevance_stats(self, doc_id: str, relevance_score: float):
+        """Bump verification_count and update running average of relevance."""
+        try:
+            result = self._collection.get(ids=[doc_id], include=["metadatas"])
+            if not result["metadatas"]:
+                return
+            meta = result["metadatas"][0]
+            n = meta.get("verification_count", 0)
+            avg = meta.get("avg_relevance", 0.0)
+            meta["verification_count"] = n + 1
+            meta["avg_relevance"] = round((avg * n + float(relevance_score)) / (n + 1), 4)
+            meta["last_accessed"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._collection.update(ids=[doc_id], metadatas=[meta])
+        except Exception:
+            pass
+
     def count(self) -> int:
         return self._collection.count()
 
