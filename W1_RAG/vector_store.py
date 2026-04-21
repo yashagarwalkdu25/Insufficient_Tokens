@@ -1,4 +1,5 @@
 """ChromaDB vector store for evidence storage and retrieval with enhanced metadata."""
+import hashlib
 import time
 from urllib.parse import urlparse
 from typing import Optional
@@ -96,7 +97,11 @@ class VectorStore:
             domain = self._extract_domain(source)
             credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
             source_type = d.get("source_type") or self._infer_source_type(domain)
-            parent_id = f"doc_{int(time.time() * 1000)}_{hash(raw_text) % 100000}"
+            # Deterministic ID so re-indexing the same (source, text) is a no-op
+            fingerprint = hashlib.md5(
+                f"{source}||{raw_text}".encode("utf-8", errors="ignore")
+            ).hexdigest()[:16]
+            parent_id = f"doc_{fingerprint}"
             total = len(chunks)
 
             for idx, chunk in enumerate(chunks):
@@ -124,12 +129,25 @@ class VectorStore:
         if not ids:
             return []
 
-        embeddings = self._embedder.encode(texts, batch_size=32).tolist()
+        # Skip chunks already in the collection — preserves access_count
+        # and keeps the KB from bloating on repeated queries.
+        try:
+            existing = set(self._collection.get(ids=ids).get("ids", []) or [])
+        except Exception:
+            existing = set()
+
+        new_items = [(i, t, m) for i, t, m in zip(ids, texts, metas)
+                     if i not in existing]
+        if not new_items:
+            return ids
+
+        new_ids, new_texts, new_metas = map(list, zip(*new_items))
+        embeddings = self._embedder.encode(new_texts, batch_size=32).tolist()
         self._collection.add(
-            ids=ids,
+            ids=new_ids,
             embeddings=embeddings,
-            documents=texts,
-            metadatas=metas,
+            documents=new_texts,
+            metadatas=new_metas,
         )
         return ids
 

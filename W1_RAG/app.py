@@ -1,4 +1,5 @@
 """Streamlit UI for the Agentic RAG News Claim Verifier."""
+import html
 import streamlit as st
 import time
 from agent import ClaimVerifier, VerificationResult
@@ -262,6 +263,14 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         gap: 10px;
+    }
+    .evidence-text {
+        font-size: 0.9rem;
+        line-height: 1.6;
+        color: #cbd5e1;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
     }
 
     /* ── Agent Trace ──────────────────────────────── */
@@ -651,8 +660,16 @@ def render_result(result: VerificationResult):
                 "fact_check": "Fact-Checker",
             }.get(ev.origin, "Source")
 
-            with st.expander(f"[{i}]  {origin_label}  ·  relevance **{ev.score:.2f}**"):
-                st.markdown(ev.text)
+            label = (
+                f":orange-background[⭐ **{ev.score:.2f}**]"
+                f"  ·  {origin_label}"
+                f"  ·  :gray[Source #{i}]"
+            )
+            with st.expander(label):
+                st.markdown(
+                    f'<p class="evidence-text">{html.escape(ev.text)}</p>',
+                    unsafe_allow_html=True,
+                )
                 if ev.source:
                     st.markdown(f"[{ev.source}]({ev.source})")
 
