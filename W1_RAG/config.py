@@ -28,6 +28,11 @@ TOP_K_RETRIEVAL = 20
 TOP_K_RERANK = 5
 MIN_RELEVANCE_SCORE = 0.3
 
+# Chunking (LangChain RecursiveCharacterTextSplitter)
+CHUNK_SIZE = 500            # chars per chunk
+CHUNK_OVERLAP = 100          # char overlap between adjacent chunks
+CHUNK_MIN_LENGTH = 40       # skip tiny leftovers
+
 # Web search
 MAX_SEARCH_RESULTS = 8
 TRUSTED_DOMAINS = [

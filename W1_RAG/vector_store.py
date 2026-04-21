@@ -5,9 +5,11 @@ from typing import Optional
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import (
     CHROMA_PERSIST_DIR, COLLECTION_NAME, EMBEDDING_MODEL,
-    TOP_K_RETRIEVAL, SOURCE_CREDIBILITY
+    TOP_K_RETRIEVAL, SOURCE_CREDIBILITY,
+    CHUNK_SIZE, CHUNK_OVERLAP, CHUNK_MIN_LENGTH,
 )
 
 
@@ -24,101 +26,111 @@ class VectorStore:
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
+        self._splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            length_function=len,
+            separators=["\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " ", ""],
+        )
+
+    def _chunk_text(self, text: str) -> list[str]:
+        """Split text into chunks; short texts pass through untouched."""
+        if not text:
+            return []
+        if len(text) <= CHUNK_SIZE:
+            return [text.strip()]
+        chunks = self._splitter.split_text(text)
+        return [c.strip() for c in chunks if len(c.strip()) >= CHUNK_MIN_LENGTH]
 
     # ------------------------------------------------------------------
     # Indexing
     # ------------------------------------------------------------------
     def add_document(self, text: str, source: str, details: str = "",
-                     timestamp: str = "", source_type: Optional[str] = None) -> str:
-        """Index a document with enhanced metadata. Returns the generated doc id.
+                     timestamp: str = "", source_type: Optional[str] = None) -> list[str]:
+        """Chunk text with RecursiveCharacterTextSplitter then index each chunk.
 
         Args:
-            text: Evidence text
+            text: Evidence text (may be long; will be chunked if needed)
             source: Source URL or reference
             details: Additional details (title, description)
             timestamp: ISO timestamp (auto-generated if not provided)
             source_type: Type of source (news/academic/fact_checker/government)
 
         Returns:
-            Document ID
+            List of document IDs (one per chunk)
         """
-        ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        doc_id = f"doc_{int(time.time()*1000)}_{hash(text) % 100000}"
-        embedding = self._embedder.encode(text).tolist()
-
-        # Extract domain and determine source type/credibility
-        domain = self._extract_domain(source)
-        credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
-
-        if not source_type:
-            source_type = self._infer_source_type(domain)
-
-        metadata = {
+        return self.add_documents_batch([{
+            "text": text,
             "source": source,
-            "source_type": source_type,
-            "source_credibility": credibility,
             "details": details,
-            "timestamp": ts,
-            "access_count": 0,
-            "verification_count": 0,
-            "avg_relevance": 0.0,
-            "last_accessed": ts,
-            "domain": domain,
-            "text_length": len(text),
-            "language": "en",  # Default to English, can be enhanced with language detection
-        }
-
-        self._collection.add(
-            ids=[doc_id],
-            embeddings=[embedding],
-            documents=[text],
-            metadatas=[metadata],
-        )
-        return doc_id
+            "timestamp": timestamp,
+            "source_type": source_type,
+        }])
 
     def add_documents_batch(self, docs: list[dict]) -> list[str]:
-        """Batch-index documents with enhanced metadata.
+        """Chunk each doc then batch-index all chunks with enhanced metadata.
 
         Each dict needs: text, source, and optionally: details, timestamp, source_type
 
-        Args:
-            docs: List of document dicts
-
         Returns:
-            List of document IDs
+            List of document IDs (one per chunk).
         """
         if not docs:
             return []
-        ids, embeddings, texts, metas = [], [], [], []
-        for d in docs:
-            ts = d.get("timestamp", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-            doc_id = f"doc_{int(time.time()*1000)}_{hash(d['text']) % 100000}"
 
-            # Extract domain and determine metadata
+        ids: list[str] = []
+        texts: list[str] = []
+        metas: list[dict] = []
+
+        for d in docs:
+            raw_text = (d.get("text") or "").strip()
+            if not raw_text:
+                continue
+
+            chunks = self._chunk_text(raw_text)
+            if not chunks:
+                continue
+
+            ts = d.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             source = d.get("source", "")
             domain = self._extract_domain(source)
             credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
             source_type = d.get("source_type") or self._infer_source_type(domain)
+            parent_id = f"doc_{int(time.time() * 1000)}_{hash(raw_text) % 100000}"
+            total = len(chunks)
 
-            ids.append(doc_id)
-            texts.append(d["text"])
-            embeddings.append(self._embedder.encode(d["text"]).tolist())
-            metas.append({
-                "source": source,
-                "source_type": source_type,
-                "source_credibility": credibility,
-                "details": d.get("details", ""),
-                "timestamp": ts,
-                "access_count": 0,
-                "verification_count": 0,
-                "avg_relevance": 0.0,
-                "last_accessed": ts,
-                "domain": domain,
-                "text_length": len(d["text"]),
-                "language": "en",
-            })
-        self._collection.add(ids=ids, embeddings=embeddings,
-                             documents=texts, metadatas=metas)
+            for idx, chunk in enumerate(chunks):
+                chunk_id = f"{parent_id}_c{idx}" if total > 1 else parent_id
+                ids.append(chunk_id)
+                texts.append(chunk)
+                metas.append({
+                    "source": source,
+                    "source_type": source_type,
+                    "source_credibility": credibility,
+                    "details": d.get("details", ""),
+                    "timestamp": ts,
+                    "access_count": 0,
+                    "verification_count": 0,
+                    "avg_relevance": 0.0,
+                    "last_accessed": ts,
+                    "domain": domain,
+                    "text_length": len(chunk),
+                    "language": "en",
+                    "parent_id": parent_id,
+                    "chunk_index": idx,
+                    "total_chunks": total,
+                })
+
+        if not ids:
+            return []
+
+        embeddings = self._embedder.encode(texts, batch_size=32).tolist()
+        self._collection.add(
+            ids=ids,
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=metas,
+        )
         return ids
 
     # ------------------------------------------------------------------

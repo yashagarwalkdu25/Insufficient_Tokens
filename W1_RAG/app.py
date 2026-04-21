@@ -645,24 +645,16 @@ def render_result(result: VerificationResult):
         st.markdown(f'<div class="section-header"><span class="icon">📄</span> Evidence ({len(result.evidence)} sources)</div>', unsafe_allow_html=True)
 
         for i, ev in enumerate(result.evidence, 1):
-            origin_badge = {
-                "kb": "🗄 Knowledge Base",
-                "web": "🌐 Web Source",
-                "fact_check": "✅ Fact-Checker",
-            }.get(ev.origin, "📄 Source")
+            origin_label = {
+                "kb": "Knowledge Base",
+                "web": "Web Source",
+                "fact_check": "Fact-Checker",
+            }.get(ev.origin, "Source")
 
-            stars = ""
-            if ev.score >= 5.0:
-                stars = " ⭐⭐⭐"
-            elif ev.score >= 3.0:
-                stars = " ⭐⭐"
-            elif ev.score >= 1.0:
-                stars = " ⭐"
-
-            with st.expander(f"[{i}] {origin_badge}  —  relevance {ev.score:.2f}{stars}"):
+            with st.expander(f"[{i}]  {origin_label}  ·  relevance **{ev.score:.2f}**"):
                 st.markdown(ev.text)
                 if ev.source:
-                    st.markdown(f"🔗 [{ev.source}]({ev.source})")
+                    st.markdown(f"[{ev.source}]({ev.source})")
 
     # ── Agent Trace ──
     if result.steps:
