@@ -8,8 +8,17 @@ from config import MAX_SEARCH_RESULTS, TRUSTED_DOMAINS, TAVILY_API_KEY
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 3
-_RETRY_DELAYS = [2, 5, 10]  # exponential backoff before falling back to Tavily
+_MAX_RETRIES = 1
+_RETRY_DELAYS = [2]  # quick single retry — Tavily fallback is faster than long backoff
+
+# Tracks whether the most recent search actually hit DDG (so callers can
+# decide whether to pace subsequent DDG calls).
+_last_used_ddg = False
+
+
+def last_search_used_ddg() -> bool:
+    """Return True if the most recent search returned results from DDG."""
+    return _last_used_ddg
 
 
 def _extract_domain(url: str) -> str:
@@ -109,11 +118,14 @@ def search_web(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict]:
 
     Tries DuckDuckGo first, falls back to Tavily if DDG fails.
     """
+    global _last_used_ddg
     results = _ddg_search(query, max_results=max_results)
     if results:
+        _last_used_ddg = True
         return results
 
     logger.info("DDG failed — falling back to Tavily for '%s'", query[:60])
+    _last_used_ddg = False
     return _tavily_search(query, max_results=max_results)
 
 
@@ -122,11 +134,13 @@ def search_trusted(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[di
 
     Tries DDG first with news keywords, falls back to Tavily with domain filtering.
     """
+    global _last_used_ddg
     # Try DDG with news-oriented keywords
     full_query = f"{query} news Reuters AP BBC"
     results = _ddg_search(full_query, max_results=max_results * 2)
 
     if results:
+        _last_used_ddg = True
         # Prefer results from trusted domains
         trusted = [r for r in results
                    if _extract_domain(r.get("url", "")) in TRUSTED_DOMAINS]
@@ -137,6 +151,7 @@ def search_trusted(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[di
     # Fallback: Tavily with trusted domain filtering
     logger.info("DDG failed — falling back to Tavily trusted search for '%s'",
                 query[:60])
+    _last_used_ddg = False
     tavily_results = _tavily_search(
         query, max_results=max_results,
         include_domains=TRUSTED_DOMAINS[:10],  # Tavily limits domain count
@@ -153,6 +168,7 @@ def search_fact_checkers(claim: str) -> list[dict]:
 
     Tries DDG first, falls back to Tavily with fact-checker domains.
     """
+    global _last_used_ddg
     fc_domains = ["snopes.com", "factcheck.org", "politifact.com", "fullfact.org"]
 
     # Try DDG with fact-check keywords
@@ -160,6 +176,7 @@ def search_fact_checkers(claim: str) -> list[dict]:
     results = _ddg_search(full_query, max_results=8)
 
     if results:
+        _last_used_ddg = True
         fc_results = [r for r in results
                       if _extract_domain(r.get("url", "")) in fc_domains]
         if fc_results:
@@ -169,6 +186,7 @@ def search_fact_checkers(claim: str) -> list[dict]:
     # Fallback: Tavily targeting fact-checker domains
     logger.info("DDG failed — falling back to Tavily fact-check search for '%s'",
                 claim[:60])
+    _last_used_ddg = False
     tavily_results = _tavily_search(
         f"{claim} fact check",
         max_results=5,

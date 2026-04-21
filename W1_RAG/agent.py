@@ -28,7 +28,9 @@ from config import (
 )
 from vector_store import VectorStore
 from reranker import Reranker
-from web_search import search_web, search_trusted, search_fact_checkers
+from web_search import (
+    search_web, search_trusted, search_fact_checkers, last_search_used_ddg,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +134,9 @@ class ClaimVerifier:
             all_evidence.extend(web_ev)
             steps.append(f"  → Found {len(web_ev)} web evidence(s)")
 
-            # Delay between DDG searches to avoid rate-limiting
-            time.sleep(4)
+            # Only pace when the previous call actually hit DDG — Tavily has no such limit
+            if last_search_used_ddg():
+                time.sleep(4)
 
             # Step 3b — Fact-checker search
             steps.append("Step 4: Searching fact-checkers…")
@@ -144,7 +147,8 @@ class ClaimVerifier:
             # Step 3c — Broad web if still thin (count only relevant evidence)
             relevant_so_far = [e for e in all_evidence if e.score > 0.0 or e.origin != "kb"]
             if len(relevant_so_far) < 2:
-                time.sleep(4)
+                if last_search_used_ddg():
+                    time.sleep(4)
                 steps.append("Step 5: Still thin → broad web search…")
                 broad_ev = self._search_and_index(claim, search_fn=search_web)
                 all_evidence.extend(broad_ev)
