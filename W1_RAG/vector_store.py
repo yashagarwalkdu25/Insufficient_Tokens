@@ -1,6 +1,8 @@
 """ChromaDB vector store for evidence storage and retrieval with enhanced metadata."""
 import hashlib
 import time
+import re
+from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from typing import Optional
 import chromadb
@@ -33,6 +35,13 @@ class VectorStore:
             length_function=len,
             separators=["\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " ", ""],
         )
+        self.last_ingest_stats = {
+            "input_docs": 0,
+            "matched_existing_docs": 0,
+            "prepared_chunks": 0,
+            "already_present_chunks": 0,
+            "added_chunks": 0,
+        }
 
     def _chunk_text(self, text: str) -> list[str]:
         """Split text into chunks; short texts pass through untouched."""
@@ -42,6 +51,26 @@ class VectorStore:
             return [text.strip()]
         chunks = self._splitter.split_text(text)
         return [c.strip() for c in chunks if len(c.strip()) >= CHUNK_MIN_LENGTH]
+
+    def _normalize_for_match(self, text: str) -> str:
+        """Normalize text for near-duplicate detection."""
+        if not text:
+            return ""
+        normalized = text.lower()
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        normalized = re.sub(r"[^a-z0-9 ]", "", normalized)
+        # Limit for faster comparisons while keeping strong signal.
+        return normalized[:800]
+
+    def _is_matching_evidence(self, candidate: str, existing: str) -> bool:
+        """Return True when candidate/evidence texts are effectively the same."""
+        if not candidate or not existing:
+            return False
+        if candidate == existing:
+            return True
+        if candidate in existing or existing in candidate:
+            return True
+        return SequenceMatcher(None, candidate, existing).ratio() >= 0.92
 
     # ------------------------------------------------------------------
     # Indexing
@@ -77,7 +106,34 @@ class VectorStore:
             List of document IDs (one per chunk).
         """
         if not docs:
+            self.last_ingest_stats = {
+                "input_docs": 0,
+                "matched_existing_docs": 0,
+                "prepared_chunks": 0,
+                "already_present_chunks": 0,
+                "added_chunks": 0,
+            }
             return []
+
+        matched_existing_docs = 0
+
+        # Build existing per-source normalized text map for duplicate checks.
+        source_to_existing_norms: dict[str, set[str]] = {}
+        try:
+            existing_rows = self._collection.get(include=["documents", "metadatas"])
+            existing_docs = existing_rows.get("documents", []) or []
+            existing_metas = existing_rows.get("metadatas", []) or []
+            for existing_text, existing_meta in zip(existing_docs, existing_metas):
+                if not existing_meta:
+                    continue
+                existing_source = existing_meta.get("source", "")
+                if not existing_source:
+                    continue
+                source_to_existing_norms.setdefault(existing_source, set()).add(
+                    self._normalize_for_match(existing_text)
+                )
+        except Exception:
+            source_to_existing_norms = {}
 
         ids: list[str] = []
         texts: list[str] = []
@@ -88,12 +144,21 @@ class VectorStore:
             if not raw_text:
                 continue
 
+            source = d.get("source", "")
+            normalized_raw = self._normalize_for_match(raw_text)
+            existing_norms = source_to_existing_norms.get(source, set())
+            if normalized_raw and any(
+                self._is_matching_evidence(normalized_raw, ex) for ex in existing_norms
+            ):
+                # Matching evidence from this source already exists; skip re-indexing.
+                matched_existing_docs += 1
+                continue
+
             chunks = self._chunk_text(raw_text)
             if not chunks:
                 continue
 
             ts = d.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            source = d.get("source", "")
             domain = self._extract_domain(source)
             credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
             source_type = d.get("source_type") or self._infer_source_type(domain)
@@ -126,7 +191,18 @@ class VectorStore:
                     "total_chunks": total,
                 })
 
+            # Also mark this candidate as present for remainder of this batch.
+            if source and normalized_raw:
+                source_to_existing_norms.setdefault(source, set()).add(normalized_raw)
+
         if not ids:
+            self.last_ingest_stats = {
+                "input_docs": len(docs),
+                "matched_existing_docs": matched_existing_docs,
+                "prepared_chunks": 0,
+                "already_present_chunks": 0,
+                "added_chunks": 0,
+            }
             return []
 
         # Skip chunks already in the collection — preserves access_count
@@ -138,7 +214,15 @@ class VectorStore:
 
         new_items = [(i, t, m) for i, t, m in zip(ids, texts, metas)
                      if i not in existing]
+        already_present_chunks = len(ids) - len(new_items)
         if not new_items:
+            self.last_ingest_stats = {
+                "input_docs": len(docs),
+                "matched_existing_docs": matched_existing_docs,
+                "prepared_chunks": len(ids),
+                "already_present_chunks": already_present_chunks,
+                "added_chunks": 0,
+            }
             return ids
 
         new_ids, new_texts, new_metas = map(list, zip(*new_items))
@@ -149,6 +233,13 @@ class VectorStore:
             documents=new_texts,
             metadatas=new_metas,
         )
+        self.last_ingest_stats = {
+            "input_docs": len(docs),
+            "matched_existing_docs": matched_existing_docs,
+            "prepared_chunks": len(ids),
+            "already_present_chunks": already_present_chunks,
+            "added_chunks": len(new_items),
+        }
         return ids
 
     # ------------------------------------------------------------------
