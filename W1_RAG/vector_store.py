@@ -1,13 +1,18 @@
 """ChromaDB vector store for evidence storage and retrieval with enhanced metadata."""
+import hashlib
 import time
+import re
+from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from typing import Optional
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import (
     CHROMA_PERSIST_DIR, COLLECTION_NAME, EMBEDDING_MODEL,
-    TOP_K_RETRIEVAL, SOURCE_CREDIBILITY
+    TOP_K_RETRIEVAL, SOURCE_CREDIBILITY,
+    CHUNK_SIZE, CHUNK_OVERLAP, CHUNK_MIN_LENGTH,
 )
 
 
@@ -24,101 +29,217 @@ class VectorStore:
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
+        self._splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            length_function=len,
+            separators=["\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " ", ""],
+        )
+        self.last_ingest_stats = {
+            "input_docs": 0,
+            "matched_existing_docs": 0,
+            "prepared_chunks": 0,
+            "already_present_chunks": 0,
+            "added_chunks": 0,
+        }
+
+    def _chunk_text(self, text: str) -> list[str]:
+        """Split text into chunks; short texts pass through untouched."""
+        if not text:
+            return []
+        if len(text) <= CHUNK_SIZE:
+            return [text.strip()]
+        chunks = self._splitter.split_text(text)
+        return [c.strip() for c in chunks if len(c.strip()) >= CHUNK_MIN_LENGTH]
+
+    def _normalize_for_match(self, text: str) -> str:
+        """Normalize text for near-duplicate detection."""
+        if not text:
+            return ""
+        normalized = text.lower()
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        normalized = re.sub(r"[^a-z0-9 ]", "", normalized)
+        # Limit for faster comparisons while keeping strong signal.
+        return normalized[:800]
+
+    def _is_matching_evidence(self, candidate: str, existing: str) -> bool:
+        """Return True when candidate/evidence texts are effectively the same."""
+        if not candidate or not existing:
+            return False
+        if candidate == existing:
+            return True
+        if candidate in existing or existing in candidate:
+            return True
+        return SequenceMatcher(None, candidate, existing).ratio() >= 0.92
 
     # ------------------------------------------------------------------
     # Indexing
     # ------------------------------------------------------------------
     def add_document(self, text: str, source: str, details: str = "",
-                     timestamp: str = "", source_type: Optional[str] = None) -> str:
-        """Index a document with enhanced metadata. Returns the generated doc id.
+                     timestamp: str = "", source_type: Optional[str] = None) -> list[str]:
+        """Chunk text with RecursiveCharacterTextSplitter then index each chunk.
 
         Args:
-            text: Evidence text
+            text: Evidence text (may be long; will be chunked if needed)
             source: Source URL or reference
             details: Additional details (title, description)
             timestamp: ISO timestamp (auto-generated if not provided)
             source_type: Type of source (news/academic/fact_checker/government)
 
         Returns:
-            Document ID
+            List of document IDs (one per chunk)
         """
-        ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        doc_id = f"doc_{int(time.time()*1000)}_{hash(text) % 100000}"
-        embedding = self._embedder.encode(text).tolist()
-
-        # Extract domain and determine source type/credibility
-        domain = self._extract_domain(source)
-        credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
-
-        if not source_type:
-            source_type = self._infer_source_type(domain)
-
-        metadata = {
+        return self.add_documents_batch([{
+            "text": text,
             "source": source,
-            "source_type": source_type,
-            "source_credibility": credibility,
             "details": details,
-            "timestamp": ts,
-            "access_count": 0,
-            "verification_count": 0,
-            "avg_relevance": 0.0,
-            "last_accessed": ts,
-            "domain": domain,
-            "text_length": len(text),
-            "language": "en",  # Default to English, can be enhanced with language detection
-        }
-
-        self._collection.add(
-            ids=[doc_id],
-            embeddings=[embedding],
-            documents=[text],
-            metadatas=[metadata],
-        )
-        return doc_id
+            "timestamp": timestamp,
+            "source_type": source_type,
+        }])
 
     def add_documents_batch(self, docs: list[dict]) -> list[str]:
-        """Batch-index documents with enhanced metadata.
+        """Chunk each doc then batch-index all chunks with enhanced metadata.
 
         Each dict needs: text, source, and optionally: details, timestamp, source_type
 
-        Args:
-            docs: List of document dicts
-
         Returns:
-            List of document IDs
+            List of document IDs (one per chunk).
         """
         if not docs:
+            self.last_ingest_stats = {
+                "input_docs": 0,
+                "matched_existing_docs": 0,
+                "prepared_chunks": 0,
+                "already_present_chunks": 0,
+                "added_chunks": 0,
+            }
             return []
-        ids, embeddings, texts, metas = [], [], [], []
-        for d in docs:
-            ts = d.get("timestamp", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-            doc_id = f"doc_{int(time.time()*1000)}_{hash(d['text']) % 100000}"
 
-            # Extract domain and determine metadata
+        matched_existing_docs = 0
+
+        # Build existing per-source normalized text map for duplicate checks.
+        source_to_existing_norms: dict[str, set[str]] = {}
+        try:
+            existing_rows = self._collection.get(include=["documents", "metadatas"])
+            existing_docs = existing_rows.get("documents", []) or []
+            existing_metas = existing_rows.get("metadatas", []) or []
+            for existing_text, existing_meta in zip(existing_docs, existing_metas):
+                if not existing_meta:
+                    continue
+                existing_source = existing_meta.get("source", "")
+                if not existing_source:
+                    continue
+                source_to_existing_norms.setdefault(existing_source, set()).add(
+                    self._normalize_for_match(existing_text)
+                )
+        except Exception:
+            source_to_existing_norms = {}
+
+        ids: list[str] = []
+        texts: list[str] = []
+        metas: list[dict] = []
+
+        for d in docs:
+            raw_text = (d.get("text") or "").strip()
+            if not raw_text:
+                continue
+
             source = d.get("source", "")
+            normalized_raw = self._normalize_for_match(raw_text)
+            existing_norms = source_to_existing_norms.get(source, set())
+            if normalized_raw and any(
+                self._is_matching_evidence(normalized_raw, ex) for ex in existing_norms
+            ):
+                # Matching evidence from this source already exists; skip re-indexing.
+                matched_existing_docs += 1
+                continue
+
+            chunks = self._chunk_text(raw_text)
+            if not chunks:
+                continue
+
+            ts = d.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             domain = self._extract_domain(source)
             credibility = SOURCE_CREDIBILITY.get(domain, 0.5)
             source_type = d.get("source_type") or self._infer_source_type(domain)
+            # Deterministic ID so re-indexing the same (source, text) is a no-op
+            fingerprint = hashlib.md5(
+                f"{source}||{raw_text}".encode("utf-8", errors="ignore")
+            ).hexdigest()[:16]
+            parent_id = f"doc_{fingerprint}"
+            total = len(chunks)
 
-            ids.append(doc_id)
-            texts.append(d["text"])
-            embeddings.append(self._embedder.encode(d["text"]).tolist())
-            metas.append({
-                "source": source,
-                "source_type": source_type,
-                "source_credibility": credibility,
-                "details": d.get("details", ""),
-                "timestamp": ts,
-                "access_count": 0,
-                "verification_count": 0,
-                "avg_relevance": 0.0,
-                "last_accessed": ts,
-                "domain": domain,
-                "text_length": len(d["text"]),
-                "language": "en",
-            })
-        self._collection.add(ids=ids, embeddings=embeddings,
-                             documents=texts, metadatas=metas)
+            for idx, chunk in enumerate(chunks):
+                chunk_id = f"{parent_id}_c{idx}" if total > 1 else parent_id
+                ids.append(chunk_id)
+                texts.append(chunk)
+                metas.append({
+                    "source": source,
+                    "source_type": source_type,
+                    "source_credibility": credibility,
+                    "details": d.get("details", ""),
+                    "timestamp": ts,
+                    "access_count": 0,
+                    "verification_count": 0,
+                    "avg_relevance": 0.0,
+                    "last_accessed": ts,
+                    "domain": domain,
+                    "text_length": len(chunk),
+                    "language": "en",
+                    "parent_id": parent_id,
+                    "chunk_index": idx,
+                    "total_chunks": total,
+                })
+
+            # Also mark this candidate as present for remainder of this batch.
+            if source and normalized_raw:
+                source_to_existing_norms.setdefault(source, set()).add(normalized_raw)
+
+        if not ids:
+            self.last_ingest_stats = {
+                "input_docs": len(docs),
+                "matched_existing_docs": matched_existing_docs,
+                "prepared_chunks": 0,
+                "already_present_chunks": 0,
+                "added_chunks": 0,
+            }
+            return []
+
+        # Skip chunks already in the collection — preserves access_count
+        # and keeps the KB from bloating on repeated queries.
+        try:
+            existing = set(self._collection.get(ids=ids).get("ids", []) or [])
+        except Exception:
+            existing = set()
+
+        new_items = [(i, t, m) for i, t, m in zip(ids, texts, metas)
+                     if i not in existing]
+        already_present_chunks = len(ids) - len(new_items)
+        if not new_items:
+            self.last_ingest_stats = {
+                "input_docs": len(docs),
+                "matched_existing_docs": matched_existing_docs,
+                "prepared_chunks": len(ids),
+                "already_present_chunks": already_present_chunks,
+                "added_chunks": 0,
+            }
+            return ids
+
+        new_ids, new_texts, new_metas = map(list, zip(*new_items))
+        embeddings = self._embedder.encode(new_texts, batch_size=32).tolist()
+        self._collection.add(
+            ids=new_ids,
+            embeddings=embeddings,
+            documents=new_texts,
+            metadatas=new_metas,
+        )
+        self.last_ingest_stats = {
+            "input_docs": len(docs),
+            "matched_existing_docs": matched_existing_docs,
+            "prepared_chunks": len(ids),
+            "already_present_chunks": already_present_chunks,
+            "added_chunks": len(new_items),
+        }
         return ids
 
     # ------------------------------------------------------------------
@@ -164,6 +285,22 @@ class VectorStore:
                 meta = result["metadatas"][0]
                 meta["access_count"] = meta.get("access_count", 0) + 1
                 self._collection.update(ids=[doc_id], metadatas=[meta])
+        except Exception:
+            pass
+
+    def update_relevance_stats(self, doc_id: str, relevance_score: float):
+        """Bump verification_count and update running average of relevance."""
+        try:
+            result = self._collection.get(ids=[doc_id], include=["metadatas"])
+            if not result["metadatas"]:
+                return
+            meta = result["metadatas"][0]
+            n = meta.get("verification_count", 0)
+            avg = meta.get("avg_relevance", 0.0)
+            meta["verification_count"] = n + 1
+            meta["avg_relevance"] = round((avg * n + float(relevance_score)) / (n + 1), 4)
+            meta["last_accessed"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._collection.update(ids=[doc_id], metadatas=[meta])
         except Exception:
             pass
 

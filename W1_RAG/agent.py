@@ -28,7 +28,9 @@ from config import (
 )
 from vector_store import VectorStore
 from reranker import Reranker
-from web_search import search_web, search_trusted, search_fact_checkers
+from web_search import (
+    search_web, search_trusted, search_fact_checkers, last_search_used_ddg,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ class Evidence:
     source: str
     score: float = 0.0
     origin: str = "kb"  # "kb" | "web" | "fact_check"
+    doc_id: str = ""  # Chroma document ID when available
 
 @dataclass
 class VerificationResult:
@@ -62,6 +65,13 @@ class ClaimVerifier:
         self.reranker = Reranker()
         self.llm = OpenAI(api_key=OPENAI_API_KEY)
         self.current_session_id: Optional[str] = None
+        self._last_index_stats: dict = {
+            "input_docs": 0,
+            "matched_existing_docs": 0,
+            "prepared_chunks": 0,
+            "already_present_chunks": 0,
+            "added_chunks": 0,
+        }
 
     # ── public API ────────────────────────────────────────────────────
     def verify(self, raw_claim: str) -> VerificationResult:
@@ -122,35 +132,54 @@ class ClaimVerifier:
         kb_evidence = self._retrieve_kb(claim)
         all_evidence.extend(kb_evidence)
         steps.append(f"  → Found {len(kb_evidence)} KB evidence(s)")
+        if kb_evidence:
+            avg_kb_score = sum(e.score for e in kb_evidence) / len(kb_evidence)
+            top_kb_score = max(e.score for e in kb_evidence)
+            steps.append(
+                f"  → KB relevance: top={top_kb_score:.2f}, avg={avg_kb_score:.2f} "
+                f"(threshold for sufficiency: avg ≥ 1.00)"
+            )
 
         # Step 3 — Decide: enough evidence?
-        enough = self._has_enough_evidence(claim, kb_evidence)
+        enough, reason = self._has_enough_evidence(claim, kb_evidence)
         if not enough:
+            # Explain WHY KB was insufficient before jumping to web
+            steps.append(f"Step 3: KB insufficient — {reason}")
+            steps.append("  → Triggering web search to gather authoritative, up-to-date evidence.")
+
             # Step 3a — Web search (trusted sources)
-            steps.append("Step 3: KB insufficient → searching trusted news…")
+            steps.append("Step 4: Searching trusted news sources (Reuters, BBC, AP, etc.)…")
             web_ev = self._search_and_index(claim, search_fn=search_trusted)
             all_evidence.extend(web_ev)
-            steps.append(f"  → Found {len(web_ev)} web evidence(s)")
+            steps.append(f"  → Found {len(web_ev)} trusted-news evidence(s)")
+            steps.append(self._format_kb_ingest_step())
 
-            # Delay between DDG searches to avoid rate-limiting
-            time.sleep(4)
+            # Only pace when the previous call actually hit DDG — Tavily has no such limit
+            if last_search_used_ddg():
+                time.sleep(4)
 
             # Step 3b — Fact-checker search
-            steps.append("Step 4: Searching fact-checkers…")
+            steps.append("Step 5: Searching fact-checkers (Snopes, FactCheck.org, PolitiFact)…")
             fc_ev = self._search_and_index(claim, search_fn=search_fact_checkers)
             all_evidence.extend(fc_ev)
             steps.append(f"  → Found {len(fc_ev)} fact-check evidence(s)")
+            steps.append(self._format_kb_ingest_step())
 
             # Step 3c — Broad web if still thin (count only relevant evidence)
             relevant_so_far = [e for e in all_evidence if e.score > 0.0 or e.origin != "kb"]
             if len(relevant_so_far) < 2:
-                time.sleep(4)
-                steps.append("Step 5: Still thin → broad web search…")
+                if last_search_used_ddg():
+                    time.sleep(4)
+                steps.append(
+                    f"Step 6: Still thin ({len(relevant_so_far)} relevant evidence) → "
+                    "falling back to broad web search…"
+                )
                 broad_ev = self._search_and_index(claim, search_fn=search_web)
                 all_evidence.extend(broad_ev)
-                steps.append(f"  → Found {len(broad_ev)} broad evidence(s)")
+                steps.append(f"  → Found {len(broad_ev)} broad-web evidence(s)")
+                steps.append(self._format_kb_ingest_step())
         else:
-            steps.append("Step 3: Sufficient KB evidence — skipping web search.")
+            steps.append(f"Step 3: KB sufficient — {reason}. Skipping web search.")
 
         # Step 4 — Deduplicate
         all_evidence = self._deduplicate(all_evidence)
@@ -163,6 +192,7 @@ class ClaimVerifier:
         # Step 6 — LLM verdict
         steps.append("Step 7: Generating verdict with LLM…")
         result = self._generate_verdict(claim, all_evidence)
+        self._update_final_verification_stats(result.evidence)
         result.steps = steps
         result.session_id = self.current_session_id
         result.claim_type = claim_type
@@ -269,49 +299,100 @@ Output ONLY valid JSON:
         reranked = self.reranker.rerank(claim, hits, top_k=TOP_K_RERANK)
         if not reranked:
             return []
-        # Only bump access counts for relevant results
+        # Bump access_count on relevant retrievals.
         for h in reranked:
             self.vs.increment_access(h["id"])
         return [
             Evidence(text=h["text"], source=h["source"],
-                     score=h.get("rerank_score", h.get("score", 0)), origin="kb")
+                     score=h.get("rerank_score", h.get("score", 0)), origin="kb",
+                     doc_id=h.get("id", ""))
             for h in reranked
         ]
 
-    def _has_enough_evidence(self, claim: str, evidence: list[Evidence]) -> bool:
+    def _has_enough_evidence(self, claim: str, evidence: list[Evidence]) -> tuple[bool, str]:
         """Check if KB evidence is sufficient — both quantity AND quality.
 
-        Returns False if:
-        - Fewer than 2 pieces of evidence
-        - Average relevance score is too low
-        - LLM says evidence is insufficient
+        Returns:
+            (is_sufficient, reason) where `reason` is a human-readable
+            explanation surfaced in the agent trace.
         """
-        # Need at least 2 pieces of evidence
+        # Quantity gate
+        if len(evidence) == 0:
+            return False, "KB returned 0 relevant documents after reranking (nothing matched the claim closely enough)"
         if len(evidence) < 2:
-            return False
+            return False, (
+                f"only {len(evidence)} relevant KB document found — need ≥2 independent "
+                "sources for cross-verification"
+            )
 
-        # Check quality: average score must be positive and meaningful
+        # Quality gate — average cross-encoder score
         avg_score = sum(e.score for e in evidence) / len(evidence)
+        top_score = max(e.score for e in evidence)
         if avg_score < 1.0:
-            return False
+            return False, (
+                f"average KB relevance too low (avg={avg_score:.2f}, top={top_score:.2f}; "
+                "need avg ≥ 1.00) — KB documents are only weakly related to the claim"
+            )
 
         # LLM sufficiency check
-        ctx = "\n".join(f"- {e.text} (relevance_score={e.score:.2f})" for e in evidence[:5])
+        # Important: evidence that clearly CONTRADICTS the claim is still sufficient
+        # for verification (it can support a "False" verdict).
+        ctx_lines = []
+        for i, e in enumerate(evidence[:5], 1):
+            ctx_lines.append(
+                f"[{i}] source={e.source or 'unknown'} | relevance={e.score:.2f}\n{e.text}"
+            )
+        ctx = "\n\n".join(ctx_lines)
         resp = self.llm.chat.completions.create(
             model=LLM_MODEL,
             temperature=0,
             messages=[
                 {"role": "system", "content": (
-                    "You decide if the provided evidence is SUFFICIENT and RELEVANT "
-                    "to verify the claim. The evidence must DIRECTLY address the claim. "
-                    "Answer ONLY 'yes' or 'no'."
+                    "You are an evidence-sufficiency judge for claim verification.\n"
+                    "Task: decide whether the provided evidence is enough to verify the claim AS STATED.\n\n"
+                    "CRITICAL RULES:\n"
+                    "- Evidence is SUFFICIENT if it directly SUPPORTS or directly CONTRADICTS the claim.\n"
+                    "- Contradictory evidence still counts as sufficient (it can justify a False verdict).\n"
+                    "- Mark insufficient only when evidence is mostly tangential, vague, or missing key specifics.\n"
+                    "- Higher relevance scores indicate stronger semantic match.\n\n"
+                    "Return ONLY strict JSON with this schema:\n"
+                    "{\n"
+                    "  \"sufficient\": true|false,\n"
+                    "  \"coverage\": \"supports\"|\"contradicts\"|\"mixed\"|\"insufficient\",\n"
+                    "  \"reason\": \"one concise sentence\"\n"
+                    "}"
                 )},
                 {"role": "user", "content": f"Claim: {claim}\n\nEvidence:\n{ctx}"},
             ],
-            max_tokens=5,
+            max_tokens=180,
+            response_format={"type": "json_object"},
         )
-        answer = resp.choices[0].message.content.strip().lower()
-        return answer.startswith("yes")
+        try:
+            data = json.loads(resp.choices[0].message.content.strip())
+            sufficient_raw = data.get("sufficient", False)
+            if isinstance(sufficient_raw, bool):
+                sufficient = sufficient_raw
+            else:
+                sufficient = str(sufficient_raw).strip().lower() in {"yes", "true", "1"}
+            coverage = str(data.get("coverage", "")).strip().lower()
+            llm_reason = str(data.get("reason", "")).strip()
+        except (json.JSONDecodeError, AttributeError):
+            sufficient = False
+            coverage = "insufficient"
+            llm_reason = "LLM sufficiency check returned malformed response"
+
+        if sufficient:
+            return True, (
+                llm_reason or
+                f"{len(evidence)} relevant docs (avg={avg_score:.2f}, top={top_score:.2f}) "
+                "directly address the claim"
+            )
+        return False, (
+            f"LLM judged KB evidence not directly addressing the claim "
+            f"(avg={avg_score:.2f}, top={top_score:.2f})"
+            + (f", coverage={coverage}" if coverage else "")
+            + (f" — {llm_reason}" if llm_reason else "")
+        )
 
     def _search_and_index(self, claim: str, search_fn) -> list[Evidence]:
         """Run a web search, index results into KB, return Evidence list."""
@@ -336,7 +417,26 @@ Output ONLY valid JSON:
         # Index into KB (ever-growing knowledge base)
         if docs_to_index:
             self.vs.add_documents_batch(docs_to_index)
+            self._last_index_stats = dict(self.vs.last_ingest_stats)
+        else:
+            self._last_index_stats = {
+                "input_docs": 0,
+                "matched_existing_docs": 0,
+                "prepared_chunks": 0,
+                "already_present_chunks": 0,
+                "added_chunks": 0,
+            }
         return evidence
+
+    def _format_kb_ingest_step(self) -> str:
+        """Format KB ingestion summary for agent trace."""
+        stats = self._last_index_stats or {}
+        return (
+            "  → KB ingest: "
+            f"added {stats.get('added_chunks', 0)} chunk(s), "
+            f"matched existing {stats.get('matched_existing_docs', 0)} doc(s), "
+            f"already-present chunks {stats.get('already_present_chunks', 0)}"
+        )
 
     def _rerank_evidence(self, claim: str, evidence: list[Evidence]) -> list[Evidence]:
         """Rerank all evidence using multi-stage reranking with source credibility.
@@ -350,14 +450,23 @@ Output ONLY valid JSON:
         """
         candidates = [{"text": e.text, "source": e.source, "origin": e.origin}
                       for e in evidence]
+        for c, e in zip(candidates, evidence):
+            c["doc_id"] = e.doc_id
         # Use enhanced reranker with credibility scoring
         reranked = self.reranker.rerank_with_credibility(claim, candidates, top_k=TOP_K_RERANK)
         return [
             Evidence(text=r["text"], source=r["source"],
                      score=r.get("final_score", r.get("rerank_score", 0)),
-                     origin=r.get("origin", "web"))
+                     origin=r.get("origin", "web"),
+                     doc_id=r.get("doc_id", ""))
             for r in reranked
         ]
+
+    def _update_final_verification_stats(self, final_evidence: list[Evidence]):
+        """Update verification stats only for evidence used in final verdict."""
+        for e in final_evidence:
+            if e.origin == "kb" and e.doc_id:
+                self.vs.update_relevance_stats(e.doc_id, e.score)
 
     def _deduplicate(self, evidence: list[Evidence]) -> list[Evidence]:
         """Remove near-duplicate evidence by source URL."""
