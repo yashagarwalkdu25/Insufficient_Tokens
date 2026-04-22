@@ -41,6 +41,7 @@ class Evidence:
     source: str
     score: float = 0.0
     origin: str = "kb"  # "kb" | "web" | "fact_check"
+    doc_id: str = ""  # Chroma document ID when available
 
 @dataclass
 class VerificationResult:
@@ -191,6 +192,7 @@ class ClaimVerifier:
         # Step 6 — LLM verdict
         steps.append("Step 7: Generating verdict with LLM…")
         result = self._generate_verdict(claim, all_evidence)
+        self._update_final_verification_stats(result.evidence)
         result.steps = steps
         result.session_id = self.current_session_id
         result.claim_type = claim_type
@@ -297,15 +299,13 @@ Output ONLY valid JSON:
         reranked = self.reranker.rerank(claim, hits, top_k=TOP_K_RERANK)
         if not reranked:
             return []
-        # Only bump access counts for relevant results
+        # Bump access_count on relevant retrievals.
         for h in reranked:
             self.vs.increment_access(h["id"])
-            self.vs.update_relevance_stats(
-                h["id"], h.get("rerank_score", h.get("score", 0.0))
-            )
         return [
             Evidence(text=h["text"], source=h["source"],
-                     score=h.get("rerank_score", h.get("score", 0)), origin="kb")
+                     score=h.get("rerank_score", h.get("score", 0)), origin="kb",
+                     doc_id=h.get("id", ""))
             for h in reranked
         ]
 
@@ -335,27 +335,50 @@ Output ONLY valid JSON:
             )
 
         # LLM sufficiency check
-        ctx = "\n".join(f"- {e.text} (relevance_score={e.score:.2f})" for e in evidence[:5])
+        # Important: evidence that clearly CONTRADICTS the claim is still sufficient
+        # for verification (it can support a "False" verdict).
+        ctx_lines = []
+        for i, e in enumerate(evidence[:5], 1):
+            ctx_lines.append(
+                f"[{i}] source={e.source or 'unknown'} | relevance={e.score:.2f}\n{e.text}"
+            )
+        ctx = "\n\n".join(ctx_lines)
         resp = self.llm.chat.completions.create(
             model=LLM_MODEL,
             temperature=0,
             messages=[
                 {"role": "system", "content": (
-                    "You decide if the provided evidence is SUFFICIENT and RELEVANT "
-                    "to verify the claim. The evidence must DIRECTLY address the claim. "
-                    "Respond with JSON: {\"sufficient\": \"yes\"|\"no\", \"reason\": \"<one short sentence>\"}."
+                    "You are an evidence-sufficiency judge for claim verification.\n"
+                    "Task: decide whether the provided evidence is enough to verify the claim AS STATED.\n\n"
+                    "CRITICAL RULES:\n"
+                    "- Evidence is SUFFICIENT if it directly SUPPORTS or directly CONTRADICTS the claim.\n"
+                    "- Contradictory evidence still counts as sufficient (it can justify a False verdict).\n"
+                    "- Mark insufficient only when evidence is mostly tangential, vague, or missing key specifics.\n"
+                    "- Higher relevance scores indicate stronger semantic match.\n\n"
+                    "Return ONLY strict JSON with this schema:\n"
+                    "{\n"
+                    "  \"sufficient\": true|false,\n"
+                    "  \"coverage\": \"supports\"|\"contradicts\"|\"mixed\"|\"insufficient\",\n"
+                    "  \"reason\": \"one concise sentence\"\n"
+                    "}"
                 )},
                 {"role": "user", "content": f"Claim: {claim}\n\nEvidence:\n{ctx}"},
             ],
-            max_tokens=120,
+            max_tokens=180,
             response_format={"type": "json_object"},
         )
         try:
             data = json.loads(resp.choices[0].message.content.strip())
-            sufficient = str(data.get("sufficient", "no")).strip().lower().startswith("yes")
+            sufficient_raw = data.get("sufficient", False)
+            if isinstance(sufficient_raw, bool):
+                sufficient = sufficient_raw
+            else:
+                sufficient = str(sufficient_raw).strip().lower() in {"yes", "true", "1"}
+            coverage = str(data.get("coverage", "")).strip().lower()
             llm_reason = str(data.get("reason", "")).strip()
         except (json.JSONDecodeError, AttributeError):
             sufficient = False
+            coverage = "insufficient"
             llm_reason = "LLM sufficiency check returned malformed response"
 
         if sufficient:
@@ -367,6 +390,7 @@ Output ONLY valid JSON:
         return False, (
             f"LLM judged KB evidence not directly addressing the claim "
             f"(avg={avg_score:.2f}, top={top_score:.2f})"
+            + (f", coverage={coverage}" if coverage else "")
             + (f" — {llm_reason}" if llm_reason else "")
         )
 
@@ -426,14 +450,23 @@ Output ONLY valid JSON:
         """
         candidates = [{"text": e.text, "source": e.source, "origin": e.origin}
                       for e in evidence]
+        for c, e in zip(candidates, evidence):
+            c["doc_id"] = e.doc_id
         # Use enhanced reranker with credibility scoring
         reranked = self.reranker.rerank_with_credibility(claim, candidates, top_k=TOP_K_RERANK)
         return [
             Evidence(text=r["text"], source=r["source"],
                      score=r.get("final_score", r.get("rerank_score", 0)),
-                     origin=r.get("origin", "web"))
+                     origin=r.get("origin", "web"),
+                     doc_id=r.get("doc_id", ""))
             for r in reranked
         ]
+
+    def _update_final_verification_stats(self, final_evidence: list[Evidence]):
+        """Update verification stats only for evidence used in final verdict."""
+        for e in final_evidence:
+            if e.origin == "kb" and e.doc_id:
+                self.vs.update_relevance_stats(e.doc_id, e.score)
 
     def _deduplicate(self, evidence: list[Evidence]) -> list[Evidence]:
         """Remove near-duplicate evidence by source URL."""

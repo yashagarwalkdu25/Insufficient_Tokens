@@ -422,18 +422,17 @@ st.markdown("""
         margin: 0.5rem 0 0.5rem;
     }
 
-    /* ── Prevent Streamlit stale-element blur/dim ── */
-    [data-stale] {
+    /* ── Prevent Streamlit stale-element blur/dim (main area only) ── */
+    section.main [data-stale] {
         opacity: 1 !important;
     }
-    div[data-testid="element-container"],
-    div[data-testid="stVerticalBlockBorderWrapper"],
-    .element-container,
-    .stApp > header + div {
+    section.main div[data-testid="element-container"],
+    section.main div[data-testid="stVerticalBlockBorderWrapper"],
+    section.main .element-container {
         opacity: 1 !important;
         transition: none !important;
     }
-    iframe[data-testid="stSkeleton"] {
+    section.main iframe[data-testid="stSkeleton"] {
         display: none !important;
     }
 </style>
@@ -447,17 +446,25 @@ def init_system():
 
 verifier = init_system()
 
-# ── Sidebar ───────────────────────────────────────────────────────────
-with st.sidebar:
-    vs = verifier.vs  # Reuse the cached verifier's VectorStore (no extra model load)
+if "kb_count" not in st.session_state:
+    st.session_state.kb_count = verifier.vs.count()
 
-    # KB Metric
-    st.markdown(f"""
+
+def render_kb_metric(container, count: int):
+    """Render the KB metric card into a dedicated sidebar placeholder."""
+    container.markdown(f"""
     <div class="kb-metric">
-        <p class="num">{vs.count()}</p>
+        <p class="num">{count}</p>
         <p class="label">Evidence in Knowledge Base</p>
     </div>
     """, unsafe_allow_html=True)
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────
+with st.sidebar:
+    # KB Metric
+    kb_metric_slot = st.empty()
+    render_kb_metric(kb_metric_slot, st.session_state.kb_count)
 
     st.markdown("### How It Works")
 
@@ -508,17 +515,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Session state for example claims ──────────────────────────────────
-if "selected_example" not in st.session_state:
-    st.session_state.selected_example = ""
+if "latest_result" not in st.session_state:
+    st.session_state.latest_result = None
+if "latest_elapsed" not in st.session_state:
+    st.session_state.latest_elapsed = None
+if "claim_text_area" not in st.session_state:
+    st.session_state.claim_text_area = ""
+
+
+def set_example_claim(example_text: str):
+    """Set claim input from example button click."""
+    st.session_state.claim_text_area = example_text
+
 
 # ── Main input ────────────────────────────────────────────────────────
 col1, col2 = st.columns([4, 1.2])
 with col1:
-    # Pre-fill with example claim if one was clicked
-    default_value = st.session_state.selected_example or ""
     claim_input = st.text_area(
         "Enter a claim to verify",
-        value=default_value,
         placeholder="e.g., 'The Earth is flat' or 'India's GDP grew 8% in 2025' or paste a headline...",
         height=100,
         label_visibility="collapsed",
@@ -527,12 +541,6 @@ with col1:
 with col2:
     st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
     verify_btn = st.button("Verify Claim", type="primary", use_container_width=True)
-
-# Auto-trigger verification when an example was just clicked
-if st.session_state.selected_example:
-    claim_input = st.session_state.selected_example
-    verify_btn = True
-    st.session_state.selected_example = ""  # Reset after use
 
 # ── Example claims ────────────────────────────────────────────────────
 st.markdown('<p class="examples-label">Try an example</p>', unsafe_allow_html=True)
@@ -546,9 +554,13 @@ examples = [
 example_cols = st.columns(len(examples))
 for i, ex in enumerate(examples):
     with example_cols[i]:
-        if st.button(ex, key=f"ex_{i}", use_container_width=True):
-            st.session_state.selected_example = ex
-            st.rerun()
+        st.button(
+            ex,
+            key=f"ex_{i}",
+            use_container_width=True,
+            on_click=set_example_claim,
+            args=(ex,),
+        )
 
 
 # ── Verdict rendering helpers ────────────────────────────────────────
@@ -681,27 +693,32 @@ def render_result(result: VerificationResult):
                 st.markdown(f'<p class="step-log">{step}</p>', unsafe_allow_html=True)
 
 
-# ── Verification ──────────────────────────────────────────────────────
+# ── Verification / Result Slot ────────────────────────────────────────
+result_slot = st.empty()
+
 if verify_btn and claim_input and claim_input.strip():
+    # Clear prior output immediately so stale results disappear while verifying.
+    st.session_state.latest_result = None
+    st.session_state.latest_elapsed = None
+    result_slot.empty()
     with st.spinner("Verifying claim — retrieving, reranking, cross-checking..."):
         start = time.time()
         result = verifier.verify(claim_input.strip())
         elapsed = time.time() - start
 
-    st.success(f"Verification complete in {elapsed:.1f}s")
-    render_result(result)
-
-    # Update KB count in sidebar
-    new_count = verifier.vs.count()
-    st.sidebar.markdown(f"""
-    <div class="kb-metric">
-        <p class="num">{new_count}</p>
-        <p class="label">Evidence in Knowledge Base</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.session_state.latest_result = result
+    st.session_state.latest_elapsed = elapsed
+    st.session_state.kb_count = verifier.vs.count()
+    render_kb_metric(kb_metric_slot, st.session_state.kb_count)
 
 elif verify_btn:
     st.warning("Please enter a claim to verify.")
+
+# Render only the most recent verification result.
+if st.session_state.latest_result is not None:
+    with result_slot.container():
+        st.success(f"Verification complete in {st.session_state.latest_elapsed:.1f}s")
+        render_result(st.session_state.latest_result)
 
 # ── Footer ────────────────────────────────────────────────────────────
 st.markdown("""
